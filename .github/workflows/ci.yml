@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      # Catalog is just a generated TOML — building it validates the DSL
+      # and that publishing wiring is intact. No tests to run.
+      - name: Build + verify catalog generates
+        run: ./gradlew build generateCatalogAsToml
+
+      - name: Show generated catalog
+        run: cat build/version-catalog/libs.versions.toml
