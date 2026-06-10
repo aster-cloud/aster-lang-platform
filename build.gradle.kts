@@ -27,13 +27,13 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "0.1.0"
+version = "1.0.0"
 
 catalog {
     versionCatalog {
         // ===== single source of truth for ecosystem versions =====
         // Current published baseline of every first-party JVM module.
-        version("asterLang", "0.0.1")
+        version("asterLang", "1.0.0")
 
         // ===== libraries (all reference the version above) =====
         library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
