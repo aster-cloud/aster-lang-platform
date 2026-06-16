@@ -27,16 +27,21 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "1.0.0"
+version = "1.0.1"
 
 catalog {
     versionCatalog {
         // ===== single source of truth for ecosystem versions =====
         // Current published baseline of every first-party JVM module.
         version("asterLang", "1.0.0")
+        // core ships ahead of the rest at 1.0.1 (Hindi/hi-IN builtin + danda
+        // canonicalization, ADR 0017). The other modules had no content change
+        // since 1.0.0, so they stay on `asterLang` to avoid a no-op ecosystem
+        // republish. Collapse this back into `asterLang` at the next full bump.
+        version("asterLangCore", "1.0.1")
 
-        // ===== libraries (all reference the version above) =====
-        library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
+        // ===== libraries =====
+        library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLangCore")
         library("runtime", "cloud.aster-lang", "aster-lang-runtime").versionRef("asterLang")
         library("truffle", "cloud.aster-lang", "aster-lang-truffle").versionRef("asterLang")
         library("validation", "cloud.aster-lang", "aster-lang-validation").versionRef("asterLang")
