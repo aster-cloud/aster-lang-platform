@@ -33,7 +33,7 @@ dependencyResolutionManagement {
     repositories { mavenLocal(); mavenCentral() /* + GitHub Packages */ }
     versionCatalogs {
         create("asterLibs") {
-            from("cloud.aster-lang:aster-lang-platform:0.1.0")
+            from("cloud.aster-lang:aster-lang-platform:1.0.3")
         }
     }
 }
@@ -69,7 +69,7 @@ dependencies {
 | `en` / `zh` / `de` | cloud.aster-lang:aster-lang-{en,zh,de} | `asterLang` |
 | bundle `locales` | en + zh + de | — |
 
-`asterLang` 当前 = `0.0.1`（与现有发布基线一致，切换时零行为变化）。
+`asterLang` 当前 = `1.0.2`（与现有发布基线一致，切换时零行为变化）。
 
 ## 迁移状态
 
