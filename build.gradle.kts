@@ -27,18 +27,17 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "1.0.2"
+version = "1.0.3"
 
 catalog {
     versionCatalog {
         // ===== single source of truth for ecosystem versions =====
         // Current published baseline of every first-party JVM module.
-        // Bumped to 1.0.1 ecosystem-wide for the Hindi/hi-IN release (ADR 0017).
-        // The non-core modules had no content change, but the catalog uses one
-        // version for all, so they are re-tagged 1.0.1 in lockstep to keep the
-        // single-version-source invariant (a partial bump skews catalog vs
-        // published artifacts; see the lang-pack hardcoded core pins).
-        version("asterLang", "1.0.1")
+        // 1.0.2 ecosystem-wide for the Hindi-SPI-extraction release (ADR 0017):
+        // core moved hi-IN out of its builtins into the new aster-lang-hi pack,
+        // so ops can hot-unload Hindi. The catalog uses one version for all, so
+        // every module is re-tagged 1.0.2 in lockstep.
+        version("asterLang", "1.0.2")
 
         // ===== libraries (all reference the version above) =====
         library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
@@ -55,11 +54,15 @@ catalog {
         library("en", "cloud.aster-lang", "aster-lang-en").versionRef("asterLang")
         library("zh", "cloud.aster-lang", "aster-lang-zh").versionRef("asterLang")
         library("de", "cloud.aster-lang", "aster-lang-de").versionRef("asterLang")
+        // Hindi (hi-IN) ships from its own repo (aster-lang-hi) as a hot-pluggable
+        // SPI pack — extracted from core's builtins so ops can load/unload it.
+        library("hi", "cloud.aster-lang", "aster-lang-hi").versionRef("asterLang")
 
         // ===== bundles =====
-        // The three first-party locale packs, for consumers that load
-        // all of them via SPI (aster-api, aster-lang-truffle runtime).
-        bundle("locales", listOf("en", "zh", "de"))
+        // The first-party locale packs, for consumers that load them all via
+        // SPI (aster-api, aster-lang-truffle runtime). Includes hi so the
+        // backend keeps offering Hindi now that it's an SPI pack, not a builtin.
+        bundle("locales", listOf("en", "zh", "de", "hi"))
     }
 }
 
