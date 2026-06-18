@@ -27,17 +27,17 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "1.0.3"
+version = "1.0.4"
 
 catalog {
     versionCatalog {
         // ===== single source of truth for ecosystem versions =====
         // Current published baseline of every first-party JVM module.
-        // 1.0.2 ecosystem-wide for the Hindi-SPI-extraction release (ADR 0017):
-        // core moved hi-IN out of its builtins into the new aster-lang-hi pack,
-        // so ops can hot-unload Hindi. The catalog uses one version for all, so
-        // every module is re-tagged 1.0.2 in lockstep.
-        version("asterLang", "1.0.2")
+        // 1.0.3 ecosystem-wide for the modern-CNL-syntax release (ADR 0019):
+        // core gained G1 (case-insensitive structural keywords) + G2a (inline if);
+        // truffle/runtime/validation carry independent fixes. The catalog uses one
+        // version for all, so every module is re-tagged 1.0.3 in lockstep.
+        version("asterLang", "1.0.3")
 
         // ===== libraries (all reference the version above) =====
         library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
