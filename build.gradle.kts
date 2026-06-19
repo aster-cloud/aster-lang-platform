@@ -27,7 +27,7 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "1.0.4"
+version = "1.0.5"
 
 catalog {
     versionCatalog {
@@ -51,9 +51,12 @@ catalog {
         // cloud.aster-lang:aster-lang-{en,zh,de}. The catalog tracks the
         // coordinate, not which repo builds it — so consumers don't care
         // about the consolidation.
-        library("en", "cloud.aster-lang", "aster-lang-en").versionRef("asterLang")
-        library("zh", "cloud.aster-lang", "aster-lang-zh").versionRef("asterLang")
-        library("de", "cloud.aster-lang", "aster-lang-de").versionRef("asterLang")
+        // 新坐标 aster-lang-locales-{en,zh,de}：从 aster-lang-locales 仓发布（自有坐标，
+        // 无 GitHub Packages 422）。老坐标 aster-lang-{en,zh,de} 归属已归档仓、冻在 1.0.2，
+        // 不再随生态级联。同 hi 用独立坐标的先例。
+        library("en", "cloud.aster-lang", "aster-lang-locales-en").versionRef("asterLang")
+        library("zh", "cloud.aster-lang", "aster-lang-locales-zh").versionRef("asterLang")
+        library("de", "cloud.aster-lang", "aster-lang-locales-de").versionRef("asterLang")
         // Hindi (hi-IN) ships from its own repo (aster-lang-hi) as a hot-pluggable
         // SPI pack — extracted from core's builtins so ops can load/unload it.
         library("hi", "cloud.aster-lang", "aster-lang-hi").versionRef("asterLang")
