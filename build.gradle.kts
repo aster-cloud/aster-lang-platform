@@ -46,11 +46,7 @@ catalog {
         library("validation", "cloud.aster-lang", "aster-lang-validation").versionRef("asterLang")
         library("test", "cloud.aster-lang", "aster-lang-test").versionRef("asterLang")
 
-        // Locale packs. NOTE: these are published from aster-lang-locales
-        // (multi-module) but keep their original coordinates
-        // cloud.aster-lang:aster-lang-{en,zh,de}. The catalog tracks the
-        // coordinate, not which repo builds it — so consumers don't care
-        // about the consolidation.
+        // Locale packs from aster-lang-locales (multi-module).
         // 新坐标 aster-lang-locales-{en,zh,de}：从 aster-lang-locales 仓发布（自有坐标，
         // 无 GitHub Packages 422）。老坐标 aster-lang-{en,zh,de} 归属已归档仓、冻在 1.0.2，
         // 不再随生态级联。同 hi 用独立坐标的先例。
