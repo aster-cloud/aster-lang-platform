@@ -27,17 +27,18 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "1.0.5"
+version = "1.0.6"
 
 catalog {
     versionCatalog {
         // ===== single source of truth for ecosystem versions =====
         // Current published baseline of every first-party JVM module.
-        // 1.0.3 ecosystem-wide for the modern-CNL-syntax release (ADR 0019):
-        // core gained G1 (case-insensitive structural keywords) + G2a (inline if);
-        // truffle/runtime/validation carry independent fixes. The catalog uses one
-        // version for all, so every module is re-tagged 1.0.3 in lockstep.
-        version("asterLang", "1.0.3")
+        // 1.0.4 ecosystem-wide for the keyword-alias-mechanism release (ADR 0022 Plan D):
+        // core gained the recognition-side alias mechanism (getAliases + Canonicalizer
+        // normalization + Validator). The catalog uses one version for all, so every
+        // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
+        // no code change — they re-release only to keep the ecosystem catalog uniform).
+        version("asterLang", "1.0.4")
 
         // ===== libraries (all reference the version above) =====
         library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
