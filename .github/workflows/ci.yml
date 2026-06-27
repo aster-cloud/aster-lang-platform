@@ -14,7 +14,7 @@ jobs:
 
       # 防漂移 gate（ADR 0023 阶段6）：本仓即 plan/script 所在，直接对自身 root 校验
       # platform artifact（self version == platformVersion）。
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - name: Release-plan drift gate
         run: |
