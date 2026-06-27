@@ -98,7 +98,7 @@
       "repo": "aster-lang-test",
       "kind": "npm",
       "versionSource": "literal",
-      "expectedVersion": "1.0.2",
+      "expectedVersion": "1.0.3",
       "expectedPlatformPin": null,
       "artifactPath": "packages/js",
       "releaseWorkflow": "release-npm.yml",
