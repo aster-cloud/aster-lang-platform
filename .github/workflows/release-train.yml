@@ -48,7 +48,7 @@ jobs:
       layers: ${{ steps.coalesce.outputs.layers }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - name: Coalesce release-plan into (repo,workflow) layers
         id: coalesce
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       # 全仓 drift gate：checkout 每个仓的 main，跑 check-artifact.py。任一漂移即停，
       # 不进发布。这是发布前最后一道防线（防 main 已漂移 / Renovate pin PR 未合）。
@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - name: Run release train
         env:
