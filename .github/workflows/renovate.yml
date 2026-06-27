@@ -50,4 +50,9 @@ jobs:
           #   brace 列表会被拆散。regex 形如 /aster-cloud\/(repo1|repo2|...)/。
           RENOVATE_AUTODISCOVER: 'true'
           RENOVATE_AUTODISCOVER_FILTER: '/^aster-cloud\/(aster-lang-platform|aster-api|aster-lang-core|aster-lang-truffle|aster-lang-locales|aster-lang-hi)$/'
+          # GH Packages 私有 Maven 认证：实测发现 platform token **不会**自动覆盖
+          # maven.pkg.github.com（日志 "hostRules: no authentication" + 401）——
+          # 与文档"自动 provision"表述相反，自托管下 Maven datasource 需显式 hostRule。
+          # 用 RENOVATE_HOST_RULES env 注入（token 来自 secret，永不进 git）。
+          RENOVATE_HOST_RULES: '[{"matchHost":"maven.pkg.github.com","hostType":"maven","token":"${{ secrets.RENOVATE_TOKEN }}"}]'
           LOG_LEVEL: ${{ github.event.inputs.logLevel || 'info' }}
