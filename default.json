@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "aster-lang 生态共享 Renovate preset（ADR 0023 阶段1）。各 pin 仓只 extends 此 preset，治理配置单点维护，不再 5 份复制。仅治理 aster-lang-platform version catalog artifact pin（settings.gradle/.kts 的 from('...:X')），不碰各仓既有 dependabot/其它依赖。GH Packages 私有 catalog artifact 的读认证由 Renovate App/org bot 的 platform token 自动提供（不在 repo 配置放 token）；若包不可见则在 org/bot 层配 hostRules+token。",
+  "description": "aster-lang 生态共享 Renovate preset（ADR 0023 阶段1）。各 pin 仓只 extends 此 preset，治理配置单点维护，不再 5 份复制。仅治理 aster-lang-platform version catalog artifact pin（settings.gradle/.kts 的 from('...:X')），不碰各仓既有 dependabot/其它依赖。GH Packages 私有 catalog artifact 的读认证由自托管 Renovate 的 platform token（RENOVATE_TOKEN，含 read:packages）自动覆盖 *.pkg.github.com（官方文档证实，无需 repo 配 hostRules/token）。",
+  "enabledManagers": ["custom.regex"],
   "customManagers": [
     {
       "customType": "regex",
