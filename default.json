@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "aster-lang 生态共享 Renovate preset（ADR 0023 阶段1）。各 pin 仓只 extends 此 preset，治理配置单点维护，不再 5 份复制。仅治理 aster-lang-platform version catalog artifact pin（settings.gradle/.kts 的 from('...:X')），不碰各仓既有 dependabot/其它依赖。GH Packages 私有 catalog artifact 的读认证由 Renovate App/org bot 的 platform token 自动提供（不在 repo 配置放 token）；若包不可见则在 org/bot 层配 hostRules+token。",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "aster-lang-platform version catalog artifact pin（单双引号皆配：aster-api 是 Groovy 单引号，其余 Kotlin 双引号）",
+      "managerFilePatterns": ["/^settings\\.gradle(\\.kts)?$/"],
+      "matchStrings": [
+        "from\\(\\s*['\"](?<depName>cloud\\.aster-lang:aster-lang-platform):(?<currentValue>\\d+\\.\\d+\\.\\d+)['\"]\\s*\\)"
+      ],
+      "datasourceTemplate": "maven",
+      "registryUrlTemplate": "https://maven.pkg.github.com/aster-cloud/aster-lang-platform"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "platform pin 在单仓内合并为一个 PR（GitHub PR 不能跨仓；真正的跨仓批次由 release-train 统一）",
+      "matchDepNames": ["cloud.aster-lang:aster-lang-platform"],
+      "groupName": "aster-lang-platform-catalog",
+      "commitMessageTopic": "aster-lang-platform version catalog",
+      "labels": ["dependencies", "release-governance"]
+    }
+  ]
+}
