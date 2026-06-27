@@ -1,0 +1,51 @@
+# 自托管 Renovate（ADR 0023 阶段1：版本来源单一化）。
+#
+# 在本仓（版本来源 hub）跑 Renovate，autodiscover 全生态有 platform pin 的
+# 6 个仓，自动 bump 各仓 settings.gradle(.kts) 的 aster-lang-platform version
+# catalog pin（消除跨仓手工同步散点）。各仓的 renovate.json extends 本仓的共享
+# preset（default.json），治理规则单点维护。
+#
+# 不装第三方托管 App——私有代码自托管更可控。
+#
+# 前置（一次性，平台侧）：org/仓库 secret `RENOVATE_TOKEN` = 一个 classic PAT，
+# scope 至少 `repo`（扫私有仓+开 PR）+ `read:packages`（读 GitHub Packages 的
+# 私有 Maven catalog artifact 以查询新版本）+ `workflow`（如需改 workflow 文件）。
+# 该 token 也让 Renovate 自动为 *.pkg.github.com 生成认证，故 GH Packages 读权限
+# 由它统一解决（preset 的 hostRules 只声明 host/type，token 来自这里）。
+name: Renovate
+
+on:
+  schedule:
+    # 每周一 04:00 UTC（接 nightly 之后，工作日早能看到 PR）
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Renovate 日志级别（调试认证/匹配问题时设 debug）'
+        required: false
+        default: 'info'
+        type: choice
+        options: ['info', 'debug']
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: renovatebot/github-action@v46
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          # autodiscover 限定到全生态有 platform pin 的 6 个仓（避免扫无关仓）。
+          # pin 仓 = api/core/truffle/locales/hi；platform 自身纳入以便未来 self-update。
+          # ★用 regex 而非 brace-glob：env var 里逗号会被当成 filter 分隔符（官方文档），
+          #   brace 列表会被拆散。regex 形如 /aster-cloud\/(repo1|repo2|...)/。
+          RENOVATE_AUTODISCOVER: 'true'
+          RENOVATE_AUTODISCOVER_FILTER: '/^aster-cloud\/(aster-lang-platform|aster-api|aster-lang-core|aster-lang-truffle|aster-lang-locales|aster-lang-hi)$/'
+          LOG_LEVEL: ${{ github.event.inputs.logLevel || 'info' }}
