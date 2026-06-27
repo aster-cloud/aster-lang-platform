@@ -38,7 +38,9 @@ jobs:
   renovate:
     runs-on: ubuntu-latest
     steps:
-      - uses: renovatebot/github-action@v46
+      # renovatebot/github-action 不发布移动式 major 标签（无 v46），只有完整版本
+      # 标签（v46.1.16 等）；必须 pin 精确版本，否则 "unable to find version v46"。
+      - uses: renovatebot/github-action@v46.1.16
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:
