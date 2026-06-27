@@ -1,0 +1,114 @@
+# ADR 0023 阶段3/5：发布列车 orchestrator。
+#
+# 读 release-plan.json（单一事实源）→ 按 releaseOrder 逐层发布全生态：
+# platform → {core,runtime,validation,test} → {locales,hi} → truffle → {ts,aster-api}。
+#
+# 每层：preflight drift gate → 并行 dispatch 各 (repo,releaseWorkflow) → 等 tag 出现 →
+# 等 tag-push release run 完成 → 等制品 registry 可见 → 进下一层。失败即停（forward-only，
+# 已发布制品不回收）。dryRun 只打印计划不真发。
+#
+# 前置：secret CROSS_REPO_TOKEN（classic PAT，scope repo + read:packages；跨仓
+# workflow_dispatch + 轮询 runs + 读 GH Packages 可见性）。
+#
+# 关键设计（Codex 交叉审查固化，见 ADR 0023 §4.2/§幂等）：
+#  - 跨仓触发用 `gh workflow run --ref main`（GH Actions 无原生跨仓 needs，靠轮询）
+#  - coalesce by (repo,releaseWorkflow)：locales/hi 的 Maven+npm 共用 release.yml 只 dispatch 一次
+#  - 等的不是 dispatch run（它只建 tag），而是 tag-push 触发的 publish run（event=push）
+#  - 制品可见性以 registry 为事实源（非 run history）：Maven 拉具体 metadata，npm view
+#  - 幂等：tag 已存在且制品已可见 → skip（resume 安全）
+name: Release Train
+
+on:
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: '只打印发布计划与 preflight，不真正 dispatch/发布'
+        type: boolean
+        default: true
+      fromLayer:
+        description: '从第几层开始（0-based，resume 用；默认 0）'
+        type: string
+        default: '0'
+      trainId:
+        description: 'release train 标识（审计；默认 run id）'
+        type: string
+        required: false
+
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      layers: ${{ steps.coalesce.outputs.layers }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Coalesce release-plan into (repo,workflow) layers
+        id: coalesce
+        run: |
+          LAYERS=$(python3 scripts/release-plan/coalesce.py --plan release-plan.json | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)))")
+          echo "layers<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$LAYERS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: Print plan
+        run: python3 scripts/release-plan/coalesce.py --plan release-plan.json
+
+  preflight:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      # 全仓 drift gate：checkout 每个仓的 main，跑 check-artifact.py。任一漂移即停，
+      # 不进发布。这是发布前最后一道防线（防 main 已漂移 / Renovate pin PR 未合）。
+      - name: Drift gate across all artifacts
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          PLAN=release-plan.json
+          fail=0
+          # artifact → repo 映射从 plan 读
+          mapfile -t ROWS < <(python3 -c "
+          import json
+          d=json.load(open('$PLAN'))
+          for a in d['artifacts']:
+              print(a['id'], a['repo'])
+          ")
+          declare -A CLONED
+          for row in "${ROWS[@]}"; do
+            ID="${row%% *}"; REPO="${row##* }"
+            if [ -z "${CLONED[$REPO]:-}" ]; then
+              git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/aster-cloud/${REPO}.git" "/tmp/$REPO" >/dev/null 2>&1
+              CLONED[$REPO]=1
+            fi
+            if ! python3 scripts/release-plan/check-artifact.py --plan "$PLAN" --artifact "$ID" --repo-root "/tmp/$REPO"; then
+              fail=1
+            fi
+          done
+          [ "$fail" = "0" ] || { echo "::error::preflight drift gate failed — 有 artifact 不符 release-plan，终止发布"; exit 1; }
+          echo "preflight drift gate: all artifacts match release-plan ✅"
+
+  train:
+    needs: [plan, preflight]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Run release train
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          LAYERS: ${{ needs.plan.outputs.layers }}
+          DRY_RUN: ${{ inputs.dryRun }}
+          FROM_LAYER: ${{ inputs.fromLayer }}
+          TRAIN_ID: ${{ inputs.trainId || github.run_id }}
+        run: bash scripts/release-plan/run-train.sh
