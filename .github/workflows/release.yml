@@ -3,9 +3,70 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # orchestrator（aster-lang-platform/release-train.yml）入口：dispatch 只创建并
+  # push tag（用 CROSS_REPO_TOKEN，PAT 才能让 tag-push 再触发 publish——GITHUB_TOKEN
+  # 推的 tag 不会触发 workflow）。真正 publish 仍只走下面的 tag-push 路径，保留
+  # tag==version gate 与既有发布语义。详见 ADR 0023 阶段2。
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的版本（不含 v 前缀），须等于 build.gradle.kts 的 version'
+        required: true
+        type: string
+      artifactIds:
+        description: 'release-plan 的 artifact id 列表（逗号分隔，审计用）'
+        required: false
+        type: string
+      trainId:
+        description: 'release train 标识（审计用）'
+        required: false
+        type: string
+
+# dispatch(vX) 与 tag-push(vX) 用同一 concurrency group（inputs.version 不含 v 前缀，
+# 补 format 成 vX 对齐 ref_name），串行化同版本的 create-tag 与 publish。
+concurrency:
+  group: release-${{ github.repository }}-${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  # dispatch 路径：仅创建 tag（用 PAT），让既有 tag-push publish 复用。
+  create-tag:
+    # 仅允许从默认分支 dispatch，避免给某个 version 恰好匹配的 feature 分支 HEAD 打 release tag。
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          fetch-depth: 0
+      - name: Create & push release tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' build.gradle.kts | head -n1)
+          if [ "$VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::dispatch version ($VERSION) != build.gradle.kts version ($PKG_VERSION)"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch --tags origin
+          TAG="v${VERSION}"
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            TAG_SHA=$(git rev-list -n1 "$TAG"); HEAD_SHA=$(git rev-parse HEAD)
+            if [ "$TAG_SHA" = "$HEAD_SHA" ]; then
+              echo "::notice::$TAG already on this commit → no-op (idempotent)"; exit 0
+            fi
+            echo "::error::$TAG exists but points to $TAG_SHA, not HEAD $HEAD_SHA"; exit 1
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+
   publish:
+    # tag-push 路径（含 orchestrator create-tag 推的 tag）才真正发布。
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
