@@ -1,0 +1,6 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>aster-cloud/aster-lang-platform"],
+  "enabledManagers": ["custom.regex"],
+  "dependencyDashboard": true
+}
