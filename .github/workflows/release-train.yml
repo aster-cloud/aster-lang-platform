@@ -100,13 +100,21 @@ jobs:
   train:
     needs: [plan, preflight]
     runs-on: ubuntu-latest
+    # packages:read 让内置 GITHUB_TOKEN 能读本 org 的 GH Packages versions（可见性查询）。
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - name: Run release train
         env:
+          # 跨仓 dispatch/轮询用 CROSS_REPO_TOKEN（需 Actions+Contents 写）。
           GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          # 可见性查询（org GH Packages versions）用内置 GITHUB_TOKEN（packages:read）——
+          # fine-grained CROSS_REPO_TOKEN 读 GH Packages 私有 Maven 受限，分离更健壮。
+          VIS_TOKEN: ${{ github.token }}
           LAYERS: ${{ needs.plan.outputs.layers }}
           DRY_RUN: ${{ inputs.dryRun }}
           FROM_LAYER: ${{ inputs.fromLayer }}

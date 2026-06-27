@@ -3,8 +3,14 @@
 # 精确 per-artifact 可见性 + 组内全 artifact 可见才算完成 + dispatch-time run 关联 +
 # service 等 deploy 完成 + scoped-npm 正确探测。
 #
-# 输入（env）：GH_TOKEN(repo+read:packages) / LAYERS(coalesce JSON) / DRY_RUN /
-#   FROM_LAYER / TRAIN_ID
+# 输入（env）：
+#   GH_TOKEN   跨仓写操作用（CROSS_REPO_TOKEN，需 Actions+Contents 写）：gh workflow run
+#              dispatch、轮询/读其他仓的 runs 与 tags。
+#   VIS_TOKEN  可见性查询用（默认 GITHUB_TOKEN，需 packages:read）：org 级 GH Packages
+#              versions 查询。**与 GH_TOKEN 分离**——fine-grained CROSS_REPO_TOKEN 读
+#              GH Packages 私有 Maven 包受限/可能 403；GITHUB_TOKEN 内置 packages:read
+#              且能读本 org 的包，更健壮。缺省回退到 GH_TOKEN。
+#   LAYERS / DRY_RUN / FROM_LAYER / TRAIN_ID
 #
 # 每个 (repo,workflow) 步骤：组内全 artifact 已可见→skip(幂等)；否则 dispatch →
 # 等 tag → 等本次 dispatch 触发的 publish run(created_at>=dispatch 时刻 + head_sha=tag commit)
@@ -14,6 +20,7 @@ set -euo pipefail
 ORG=aster-cloud
 DRY="${DRY_RUN:-true}"
 FROM="${FROM_LAYER:-0}"
+VIS_TOKEN="${VIS_TOKEN:-$GH_TOKEN}"   # 可见性查询 token（GITHUB_TOKEN），缺省退回 GH_TOKEN
 POLL_INTERVAL=20
 POLL_MAX=90   # 90 × 20s = 30min/项（Java/Gradle 冷缓存发布偏慢）
 
@@ -43,7 +50,7 @@ artifact_visible() {  # $1=artifact JSON
       [ -n "$pkgs" ] || return 1
       while IFS= read -r p; do
         [ -z "$p" ] && continue
-        gh api "orgs/$ORG/packages/maven/$p/versions" -q '.[].name' 2>/dev/null \
+        GH_TOKEN="$VIS_TOKEN" gh api "orgs/$ORG/packages/maven/$p/versions" -q '.[].name' 2>/dev/null \
           | grep -qx "$ver" || return 1
       done <<<"$pkgs"
       return 0 ;;
@@ -57,7 +64,7 @@ artifact_visible() {  # $1=artifact JSON
       else
         # GH Packages npm：package_name 用完整 scoped 名 URL-encode（@aster-cloud%2Fxxx）。
         local enc; enc=$(jq -rn --arg v "$npm" '$v|@uri')
-        gh api "orgs/$ORG/packages/npm/$enc/versions" -q '.[].name' 2>/dev/null | grep -qx "$ver"
+        GH_TOKEN="$VIS_TOKEN" gh api "orgs/$ORG/packages/npm/$enc/versions" -q '.[].name' 2>/dev/null | grep -qx "$ver"
         return $?
       fi ;;
     service) return 0 ;;  # service 无 registry 版本，可见性由 deploy run 成功代表（见 run_step）
