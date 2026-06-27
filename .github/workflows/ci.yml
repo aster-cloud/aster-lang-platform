@@ -12,6 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # 防漂移 gate（ADR 0023 阶段6）：本仓即 plan/script 所在，直接对自身 root 校验
+      # platform artifact（self version == platformVersion）。
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Release-plan drift gate
+        run: |
+          python3 scripts/release-plan/check-artifact.py \
+            --plan release-plan.json --artifact platform --repo-root .
+
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
