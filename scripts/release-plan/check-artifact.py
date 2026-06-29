@@ -60,12 +60,24 @@ def npm_version(pkg_json: Path) -> str | None:
     return json.loads(pkg_json.read_text(encoding="utf-8")).get("version")
 
 
-def settings_platform_pin(repo_root: Path) -> str | None:
-    s = find_settings(repo_root)
+def _settings_pin_at(base: Path) -> str | None:
+    s = find_settings(base)
     if not s:
         return None
     m = re.search(r'from\(\s*["\']cloud\.aster-lang:aster-lang-platform:([0-9.]+)["\']\s*\)', read_text(s))
     return m.group(1) if m else None
+
+
+def settings_platform_pin(repo_root: Path, artifact_path: str | None = None) -> str | None:
+    # 子目录制品（如 test:jvm 的 packages/jvm）的 settings/pin 在 artifactPath 下，
+    # 不在仓根。先试 artifactPath 子目录，找不到再回退仓根——与 build_file_for 的
+    # artifactPath 模型一致。注意双制品仓（locales/hi）的 npm artifact 虽有 artifactPath
+    # (ui-messages) 但其 Gradle settings/pin 在仓根，子目录无 settings → 自动回退仓根。
+    if artifact_path:
+        pin = _settings_pin_at(repo_root / artifact_path)
+        if pin is not None:
+            return pin
+    return _settings_pin_at(repo_root)
 
 
 def build_file_for(repo_root: Path, artifact_path: str | None) -> Path:
@@ -122,7 +134,7 @@ def main() -> int:
     # platform pin 校验（凡 expectedPlatformPin 非 null）
     exp_pin = art.get("expectedPlatformPin")
     if exp_pin is not None:
-        actual_pin = settings_platform_pin(repo_root)
+        actual_pin = settings_platform_pin(repo_root, artifact_path)
         if actual_pin != exp_pin:
             failures.append(f"platform pin {actual_pin!r} != expected {exp_pin!r}（应 == plan.platformVersion {plat_ver!r}）")
         if exp_pin != plat_ver:

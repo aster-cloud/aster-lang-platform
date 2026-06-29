@@ -60,9 +60,9 @@
       "id": "runtime:maven",
       "repo": "aster-lang-runtime",
       "kind": "maven",
-      "versionSource": "literal",
+      "versionSource": "catalog-derived",
       "expectedVersion": "1.0.6",
-      "expectedPlatformPin": null,
+      "expectedPlatformPin": "1.0.8",
       "releaseWorkflow": "release.yml",
       "mavenPackages": [
         "cloud.aster-lang.aster-lang-runtime"
@@ -72,9 +72,9 @@
       "id": "validation:maven",
       "repo": "aster-lang-validation",
       "kind": "maven",
-      "versionSource": "literal",
+      "versionSource": "catalog-derived",
       "expectedVersion": "1.0.6",
-      "expectedPlatformPin": null,
+      "expectedPlatformPin": "1.0.8",
       "releaseWorkflow": "release.yml",
       "mavenPackages": [
         "cloud.aster-lang.aster-lang-validation"
@@ -84,9 +84,9 @@
       "id": "test:jvm",
       "repo": "aster-lang-test",
       "kind": "maven",
-      "versionSource": "literal",
+      "versionSource": "catalog-derived",
       "expectedVersion": "1.0.6",
-      "expectedPlatformPin": null,
+      "expectedPlatformPin": "1.0.8",
       "artifactPath": "packages/jvm",
       "releaseWorkflow": "release-maven.yml",
       "mavenPackages": [
