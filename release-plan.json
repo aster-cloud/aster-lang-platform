@@ -2,7 +2,7 @@
     "$comment": "aster-lang 生态发布的单一事实源（ADR 0023）。orchestrator(release-train.yml)读它编排发布顺序；各仓 CI 的 pin-consistency gate 据它断言。platformVersion=catalog artifact 自身版本（catalog 内容变更才 bump）；ecosystemVersion=catalog 内 asterLang 值=引擎 Maven 制品内容版本；tsNpmVersion=aster-lang-ts npm 版本；uiMessagesNpmVersion=ui-messages 系列 npm 版本（locales/hi 的前端文案包，独立 cadence）。**以 artifact 粒度建模**：双/多制品仓（locales/hi/test 同时发 Maven+npm）拆成多条 artifact，各有唯一 id；releaseOrder 用 id。",
     "platformVersion": "1.0.13",
     "ecosystemVersion": "1.0.11",
-    "tsNpmVersion": "1.0.11",
+    "tsNpmVersion": "1.0.12",
     "uiMessagesNpmVersion": "1.0.6",
     "$releaseOrderComment": "发布 DAG 的 **artifact 依赖序**（id 粒度，同一层无依赖可并行）。但执行层（orchestrator）须按 (repo, releaseWorkflow) **coalesce**：locales:maven 与 locales:npm 是同一个 aster-lang-locales/release.yml 在同一 v* tag 发的两个制品，只能 dispatch 该 workflow 一次（传 artifactIds 列表），绝不可按 artifact 逐个 dispatch 否则重复 publish。test 例外——test:jvm/test:npm 是两个独立 workflow(release-maven.yml/release-npm.yml)，可真正并行。",
     "releaseOrder": [
@@ -172,7 +172,7 @@
             "repo": "aster-lang-ts",
             "kind": "npm",
             "versionSource": "literal",
-            "expectedVersion": "1.0.11",
+            "expectedVersion": "1.0.12",
             "expectedPlatformPin": null,
             "releaseWorkflow": "release.yml",
             "npmName": "@aster-cloud/aster-lang-ts",
