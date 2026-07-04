@@ -80,6 +80,22 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
+      # Tag↔version guard (audit #32): the v* tag must match the platform's own
+      # version literal in build.gradle.kts. Without this, a manually pushed
+      # v1.0.14 on a 1.0.13 commit would publish/no-op under the wrong tag with no
+      # error (create-tag's gate only runs on the dispatch path, not tag-push).
+      # Mirrors the "Verify tag matches project version" step in aster-lang-test /
+      # aster-lang-locales.
+      - name: Verify tag matches project version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' build.gradle.kts | head -n1)
+          echo "tag=$TAG  projectVersion=$PROJECT_VERSION"
+          if [ "$TAG" != "$PROJECT_VERSION" ]; then
+            echo "::error::Tag v$TAG does not match project version $PROJECT_VERSION. Bump build.gradle.kts or fix the tag."
+            exit 1
+          fi
+
       # The catalog has no compiled code or deps — just generate + publish.
       - name: Publish version catalog to GitHub Packages
         run: ./gradlew publish

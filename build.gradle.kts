@@ -40,6 +40,19 @@ catalog {
         // no code change — they re-release only to keep the ecosystem catalog uniform).
         version("asterLang", "1.0.11")
 
+        // ===== third-party ecosystem versions =====
+        // These were previously hardcoded across consumer repos and had begun to
+        // drift (audit #32): quarkus-bom 3.32.2 in -runtime vs 3.37.0 in aster-api;
+        // assertj 3.27.3 (-core) / 3.27.6 (-validation) / 3.27.7 (aster-api). Governing
+        // them here gives consumers one aligned value to import. Where consumers
+        // diverged the NEWER value is chosen as the catalog target; runtime/validation
+        // and other laggards should adopt these in a follow-up migration (this platform
+        // PR does not touch consumer repos).
+        version("junit", "6.0.0")      // org.junit.jupiter:junit-jupiter (uniform across consumers)
+        version("quarkus", "3.37.0")   // quarkus-bom: newer of 3.32.2 (-runtime) / 3.37.0 (aster-api)
+        version("antlr", "4.13.1")     // ANTLR tool + runtime (aster-lang-core)
+        version("assertj", "3.27.7")   // newest present: 3.27.3 / 3.27.6 / 3.27.7 across consumers
+
         // ===== libraries (all reference the version above) =====
         library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
         library("runtime", "cloud.aster-lang", "aster-lang-runtime").versionRef("asterLang")
@@ -57,6 +70,15 @@ catalog {
         // Hindi (hi-IN) ships from its own repo (aster-lang-hi) as a hot-pluggable
         // SPI pack — extracted from core's builtins so ops can load/unload it.
         library("hi", "cloud.aster-lang", "aster-lang-hi").versionRef("asterLang")
+
+        // ===== third-party libraries =====
+        // Reference the third-party versions declared above so consumers can
+        // replace their hardcoded literals with aliases (e.g. asterLibs.junit.jupiter).
+        library("junit-jupiter", "org.junit.jupiter", "junit-jupiter").versionRef("junit")
+        library("quarkus-bom", "io.quarkus.platform", "quarkus-bom").versionRef("quarkus")
+        library("antlr", "org.antlr", "antlr4").versionRef("antlr")
+        library("antlr-runtime", "org.antlr", "antlr4-runtime").versionRef("antlr")
+        library("assertj-core", "org.assertj", "assertj-core").versionRef("assertj")
 
         // ===== bundles =====
         // The first-party locale packs, for consumers that load them all via
