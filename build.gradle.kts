@@ -27,7 +27,11 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-version = "1.0.13"
+// 1.0.14：审计 #32 的第三方版本别名（junit/quarkus/antlr/assertj）在 1.0.13 的 PR #33 里加进
+// catalog 但当时**没 bump 版本**，故已发布的 1.0.13 catalog 不含这些别名——消费者 import 会报
+// 未知别名。本次 catalog-only bump（asterLang 首方版本不变=不触发生态级联）发布含别名的 1.0.14，
+// 消费者改 pin 1.0.14 后即可用 asterLibs.assertj.core 等。
+version = "1.0.14"
 
 catalog {
     versionCatalog {
