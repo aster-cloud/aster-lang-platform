@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# 同一 ref 上新 push 到来时取消尚在跑的过时 CI（PR 连续 push 常见）——省算力/排队。
+# 该仓 CI 无发布/部署副作用（release 是独立 workflow），故可直接 cancel 过时 run。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
