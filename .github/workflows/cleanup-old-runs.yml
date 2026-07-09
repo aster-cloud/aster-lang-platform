@@ -1,0 +1,88 @@
+# cleanup-old-runs —— 清理超过 7 天的旧 workflow run
+#
+# GitHub 原生「log retention」只删日志不删 run 记录,故用本 workflow 主动删除。
+# 每天 03:00 UTC 跑 + 可手动触发(workflow_dispatch)。
+# 删除策略:created_at 早于 (now - RETENTION_DAYS) 的**已结束** run（跳过 in_progress/queued,
+# 绝不删正在跑的）。跨所有 workflow、所有分支、所有状态。
+# 权限最小:仅 actions:write（删 run 所需）。
+
+name: cleanup-old-runs
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 每天 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: '保留天数（删除早于此的 run）'
+        required: false
+        default: '7'
+      dry_run:
+        description: 'dry-run（true=只列不删）'
+        required: false
+        default: 'false'
+
+permissions:
+  actions: write        # 删除 workflow run
+  contents: read
+
+concurrency:
+  group: cleanup-old-runs
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete workflow runs older than retention window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RETENTION_DAYS: ${{ github.event.inputs.retention_days || '7' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          cutoff="$(date -u -d "-${RETENTION_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
+          echo "仓库: $REPO  保留天数: $RETENTION_DAYS  截止(早于则删): $cutoff  dry-run: $DRY_RUN"
+
+          deleted=0; skipped_active=0; scanned=0
+          # 分页拉取所有 run（每页 100,最多扫 40 页=4000 条,足够覆盖一周以上积压）。
+          for page in $(seq 1 40); do
+            runs="$(gh api "repos/${REPO}/actions/runs?per_page=100&page=${page}" \
+                     --jq '.workflow_runs[] | {id, status, created_at} | @base64' 2>/dev/null || true)"
+            [ -z "$runs" ] && break
+            page_had_old=false
+            for row in $runs; do
+              scanned=$((scanned + 1))
+              j="$(echo "$row" | base64 -d)"
+              id="$(echo "$j" | jq -r '.id')"
+              status="$(echo "$j" | jq -r '.status')"
+              created="$(echo "$j" | jq -r '.created_at')"
+              # 只删已结束的 run（completed）;跳过 in_progress/queued/waiting/requested/pending。
+              if [ "$status" != "completed" ]; then
+                skipped_active=$((skipped_active + 1)); continue
+              fi
+              # created_at 早于 cutoff → 删。字符串比较对 ISO8601 UTC 有效。
+              if [[ "$created" < "$cutoff" ]]; then
+                page_had_old=true
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "  [dry-run] would delete run $id (created $created)"
+                else
+                  gh api --method DELETE "repos/${REPO}/actions/runs/${id}" >/dev/null 2>&1 \
+                    && { echo "  deleted run $id (created $created)"; deleted=$((deleted + 1)); } \
+                    || echo "  ::warning::删除 run $id 失败（可能已删/无权限）"
+                fi
+              fi
+            done
+            # API 按 created_at 倒序返回:某页全是「新于 cutoff」且非首页,则后续页更新,可提前停。
+            # 但保守起见继续翻页,直到空页（上面 break）。
+            [ "$page_had_old" = "false" ] && [ "$page" -gt 1 ] && { echo "本页无更旧 run,停止翻页"; break; }
+          done
+
+          echo "扫描 ${scanned} 条; 删除 ${deleted}; 跳过进行中 ${skipped_active}。"
+          {
+            echo "### cleanup-old-runs"
+            echo "- 保留天数: ${RETENTION_DAYS}"
+            echo "- 扫描: ${scanned} / 删除: ${deleted} / 跳过进行中: ${skipped_active}"
+            echo "- dry-run: ${DRY_RUN}"
+          } >> "$GITHUB_STEP_SUMMARY"
