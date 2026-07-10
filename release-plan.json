@@ -3,7 +3,7 @@
   "platformVersion": "1.0.14",
   "ecosystemVersion": "1.0.12",
   "tsNpmVersion": "1.0.14",
-  "uiMessagesNpmVersion": "1.0.7",
+  "uiMessagesNpmVersion": "1.0.8",
   "$releaseOrderComment": "发布 DAG 的 **artifact 依赖序**（id 粒度，同一层无依赖可并行）。但执行层（orchestrator）须按 (repo, releaseWorkflow) **coalesce**：locales:maven 与 locales:npm 是同一个 aster-lang-locales/release.yml 在同一 v* tag 发的两个制品，只能 dispatch 该 workflow 一次（传 artifactIds 列表），绝不可按 artifact 逐个 dispatch 否则重复 publish。test 例外——test:jvm/test:npm 是两个独立 workflow(release-maven.yml/release-npm.yml)，可真正并行。",
   "releaseOrder": [
     [
@@ -124,7 +124,7 @@
       "repo": "aster-lang-locales",
       "kind": "npm",
       "versionSource": "literal",
-      "expectedVersion": "1.0.7",
+      "expectedVersion": "1.0.8",
       "expectedPlatformPin": "1.0.14",
       "artifactPath": "ui-messages",
       "releaseWorkflow": "release.yml",
@@ -148,7 +148,7 @@
       "repo": "aster-lang-hi",
       "kind": "npm",
       "versionSource": "literal",
-      "expectedVersion": "1.0.7",
+      "expectedVersion": "1.0.8",
       "expectedPlatformPin": "1.0.14",
       "artifactPath": "ui-messages",
       "releaseWorkflow": "release.yml",
