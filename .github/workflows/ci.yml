@@ -12,6 +12,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# 最小权限：本 workflow 仅 checkout + build + 校验 catalog，无 push/release/评论/上传，
+# 故只需只读仓库内容，撤销默认宽泛 GITHUB_TOKEN 写权限。
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
