@@ -27,9 +27,11 @@ plugins {
 group = "cloud.aster-lang"
 // The platform artifact's OWN version. Bump this when the catalog
 // contents change (i.e. when any ecosystem version below changes).
-// M2.1b：aster-lang-truffle 加步骤级决策 trace 收集器（TraceAccess/TraceCollector，
-// ADR 0030 真回放 payload）。lockstep 生态 → asterLang 1.0.13→1.0.14，platform 自身 1.0.15→1.0.16。
-version = "1.0.16"
+// 2026-07 全量审计收尾：28 项发现全部处理完毕（跨 core/ts/truffle/test/aster-api）。
+// 本次把 platform 自身与生态号**对齐到同一数字**——此前 platform 因 wrapper 升级、
+// 治理文件、审计报告等仅影响自身的改动先行到 1.0.16，生态仍停在 1.0.14，两者相差 2。
+// lockstep 生态 → asterLang 1.0.14→1.0.17，platform 自身 1.0.16→1.0.17（追平）。
+version = "1.0.17"
 
 catalog {
     versionCatalog {
@@ -40,7 +42,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.14")
+        version("asterLang", "1.0.17")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
