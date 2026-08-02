@@ -5,7 +5,11 @@
 #
 # 输入（env）：
 #   GH_TOKEN   跨仓写操作用（CROSS_REPO_TOKEN，需 Actions+Contents 写）：gh workflow run
-#              dispatch、轮询/读其他仓的 runs 与 tags。
+#              dispatch、轮询/读其他仓的 runs 与 tags。**owner=aster-cloud**。
+#   WONTLOST_TOKEN  同上但 **owner=wontlost-ltd**（secret CROSS_REPO_TOKEN_WONTLOST，
+#              token 名 aster-cross-repo-wontlost）。fine-grained PAT 的 resource owner
+#              只能选一个 org，故跨 org 必须备两个 token——这不是冗余配置，是 GitHub 的
+#              硬约束。缺省回退 GH_TOKEN（若将来换成 classic PAT 可一个走天下）。
 #   VIS_TOKEN  可见性查询用（默认 GITHUB_TOKEN，需 packages:read）：org 级 GH Packages
 #              versions 查询。**与 GH_TOKEN 分离**——fine-grained CROSS_REPO_TOKEN 读
 #              GH Packages 私有 Maven 包受限/可能 403；GITHUB_TOKEN 内置 packages:read
@@ -27,6 +31,8 @@ PKG_ORG=aster-cloud
 DRY="${DRY_RUN:-true}"
 FROM="${FROM_LAYER:-0}"
 VIS_TOKEN="${VIS_TOKEN:-$GH_TOKEN}"   # 可见性查询 token（GITHUB_TOKEN），缺省退回 GH_TOKEN
+WONTLOST_TOKEN="${WONTLOST_TOKEN:-}"  # owner=wontlost-ltd 的 fine-grained PAT
+ASTER_CLOUD_TOKEN="$GH_TOKEN"         # 保留原始（GH_TOKEN 会被 token_for 改写）
 POLL_INTERVAL=20
 POLL_MAX=90   # 90 × 20s = 30min/项（Java/Gradle 冷缓存发布偏慢）
 
@@ -35,6 +41,23 @@ command -v gh  >/dev/null || { echo "::error::gh not found"; exit 1; }
 command -v npm >/dev/null || { echo "::error::npm not found"; exit 1; }
 
 log() { echo "[$(date -u +%H:%M:%S)] $*"; }
+
+# 按目标 org 切换 gh 使用的令牌（gh 从环境读 GH_TOKEN，故只能整体切换）。
+# ★fine-grained PAT 的 resource owner 只能选一个 org——这是 GitHub 的硬约束，
+#   不是配置冗余。缺 wontlost 令牌时 fail-fast，绝不静默用错 org 的令牌去打
+#   （那会得到一个 404，看起来像"仓不存在"，极难排查——本次 aster-api 就踩过）。
+use_token_for_org() {  # $1 = org
+  case "$1" in
+    wontlost-ltd)
+      [ -n "$WONTLOST_TOKEN" ] || {
+        echo "::error::step 目标 org=wontlost-ltd，但未提供 WONTLOST_TOKEN（secret CROSS_REPO_TOKEN_WONTLOST，token 名 aster-cross-repo-wontlost）。fine-grained PAT 的 owner 只能选一个 org，aster-cloud 的令牌对 wontlost-ltd 仓会返回 404。"
+        return 1
+      }
+      export GH_TOKEN="$WONTLOST_TOKEN" ;;
+    *)
+      export GH_TOKEN="$ASTER_CLOUD_TOKEN" ;;
+  esac
+}
 
 # run 关联用的起始时刻：回退 60s 容忍 runner 与 GitHub API created_at 的边界/时钟偏差。
 since_iso() { date -u -d '60 seconds ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-60S +%Y-%m-%dT%H:%M:%SZ; }
@@ -151,7 +174,10 @@ run_step() {  # $1 = step JSON
   local step="$1" repo workflow version ids kinds since tag commit
   repo=$(jq -r '.repo' <<<"$step")
   # ★按 step 覆写仓库 org（coalesce.py 从 release-plan 的 artifact.org 带出，缺省 aster-cloud）
+  #   并同步切换 GH_TOKEN——fine-grained PAT 的 resource owner 只能选一个 org，
+  #   故 aster-cloud 与 wontlost-ltd 各需一个 token（见文件头 env 说明）。
   REPO_ORG=$(jq -r '.org // "aster-cloud"' <<<"$step")
+  use_token_for_org "$REPO_ORG"
   workflow=$(jq -r '.workflow' <<<"$step")
   version=$(jq -r '.version // empty' <<<"$step")
   ids=$(jq -r '.artifactIds | join(",")' <<<"$step")

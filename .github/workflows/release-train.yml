@@ -73,6 +73,9 @@ jobs:
       - name: Drift gate across all artifacts
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          # ★owner=wontlost-ltd 的 fine-grained PAT（token 名 aster-cross-repo-wontlost）。
+          #   fine-grained PAT 的 resource owner 只能选一个 org，故跨 org 必须两个 token。
+          WONTLOST_TOKEN: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
         run: |
           set -euo pipefail
           PLAN=release-plan.json
@@ -92,11 +95,24 @@ jobs:
           for row in "${ROWS[@]}"; do
             read -r ID REPO ORG <<< "$row"
             if [ -z "${CLONED[$REPO]:-}" ]; then
+              # ★按 org 选令牌：aster-cloud 用 GH_TOKEN，wontlost-ltd 用 WONTLOST_TOKEN。
+              #   用错 org 的 fine-grained PAT 会得到 404/403（看起来像"仓不存在"），
+              #   故缺令牌时 fail-fast 并明确指出缺哪个 secret，绝不静默降级。
+              if [ "$ORG" = "wontlost-ltd" ]; then
+                TOK="$WONTLOST_TOKEN"
+                if [ -z "$TOK" ]; then
+                  echo "::error::[$ID] 目标 org=wontlost-ltd 但未配置 secret CROSS_REPO_TOKEN_WONTLOST（token 名 aster-cross-repo-wontlost）"
+                  fail=1
+                  continue
+                fi
+              else
+                TOK="$GH_TOKEN"
+              fi
               if ! git clone --depth 1 \
-                   "https://x-access-token:${GH_TOKEN}@github.com/${ORG}/${REPO}.git" \
+                   "https://x-access-token:${TOK}@github.com/${ORG}/${REPO}.git" \
                    "/tmp/$REPO" 2>/tmp/clone-err; then
                 echo "::error::[$ID] clone ${ORG}/${REPO} 失败（下方为 git 原始报错，token 已脱敏）："
-                sed "s#${GH_TOKEN}#***#g" /tmp/clone-err >&2
+                sed -e "s#${TOK}#***#g" /tmp/clone-err >&2
                 fail=1
                 continue
               fi
@@ -122,8 +138,12 @@ jobs:
         with: { python-version: '3.12' }
       - name: Run release train
         env:
-          # 跨仓 dispatch/轮询用 CROSS_REPO_TOKEN（需 Actions+Contents 写）。
+          # 跨仓 dispatch/轮询用 CROSS_REPO_TOKEN（需 Actions+Contents 写）。owner=aster-cloud。
           GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          # ★owner=wontlost-ltd 的 fine-grained PAT（token 名 aster-cross-repo-wontlost）。
+          #   目前唯一用到它的是层4 的 aster-api:service（dispatch deploy.yml + 轮询 run），
+          #   故需 Actions: Read and write + Contents: Read。
+          WONTLOST_TOKEN: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
           # 可见性查询（org GH Packages versions）用内置 GITHUB_TOKEN（packages:read）——
           # fine-grained CROSS_REPO_TOKEN 读 GH Packages 私有 Maven 受限，分离更健壮。
           VIS_TOKEN: ${{ github.token }}
