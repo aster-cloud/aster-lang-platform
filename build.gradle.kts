@@ -31,7 +31,9 @@ group = "cloud.aster-lang"
 // 本次把 platform 自身与生态号**对齐到同一数字**——此前 platform 因 wrapper 升级、
 // 治理文件、审计报告等仅影响自身的改动先行到 1.0.16，生态仍停在 1.0.14，两者相差 2。
 // lockstep 生态 → asterLang 1.0.14→1.0.17，platform 自身 1.0.16→1.0.17（追平）。
-version = "1.0.17"
+// 1.0.18：core 生产词法器补天城文、truffle NameNode slot 读取修复 + AsyncTaskRegistry
+// 线程池泄漏、ts eval-parity 转 PR-blocking。platform 与生态号继续保持一致。
+version = "1.0.18"
 
 catalog {
     versionCatalog {
@@ -42,7 +44,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.17")
+        version("asterLang", "1.0.18")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
