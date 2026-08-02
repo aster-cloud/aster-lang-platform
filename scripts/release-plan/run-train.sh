@@ -17,7 +17,13 @@
 # → 等组内全 artifact registry 可见。forward-only 失败即停。
 set -euo pipefail
 
-ORG=aster-cloud
+# ★仓库所属 org：缺省 aster-cloud；aster-api 于 2026-08 迁至 wontlost-ltd。
+#   run_step 会按 step.org 覆写 REPO_ORG（同一 step 内 repo 唯一，故可用全局）。
+#   ★PKG_ORG 与之无关且**不随 repo 变**：GH Packages 制品统一发布在 aster-cloud
+#     组织下（包名 @aster-cloud/*），即便源码仓迁走也不变。两者别混。
+DEFAULT_ORG=aster-cloud
+REPO_ORG="$DEFAULT_ORG"
+PKG_ORG=aster-cloud
 DRY="${DRY_RUN:-true}"
 FROM="${FROM_LAYER:-0}"
 VIS_TOKEN="${VIS_TOKEN:-$GH_TOKEN}"   # 可见性查询 token（GITHUB_TOKEN），缺省退回 GH_TOKEN
@@ -35,7 +41,7 @@ since_iso() { date -u -d '60 seconds ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || dat
 
 # 远端是否已存在该 tag。
 remote_tag_exists() {  # repo, tag
-  gh api "repos/$ORG/$1/git/refs/tags/$2" -q '.ref' >/dev/null 2>&1
+  gh api "repos/$REPO_ORG/$1/git/refs/tags/$2" -q '.ref' >/dev/null 2>&1
 }
 
 # ── 单个 artifact 可见性（精确，按具体 package name）────────────────────────
@@ -50,7 +56,7 @@ artifact_visible() {  # $1=artifact JSON
       [ -n "$pkgs" ] || return 1
       while IFS= read -r p; do
         [ -z "$p" ] && continue
-        GH_TOKEN="$VIS_TOKEN" gh api "orgs/$ORG/packages/maven/$p/versions" -q '.[].name' 2>/dev/null \
+        GH_TOKEN="$VIS_TOKEN" gh api "orgs/$PKG_ORG/packages/maven/$p/versions" -q '.[].name' 2>/dev/null \
           | grep -qx "$ver" || return 1
       done <<<"$pkgs"
       return 0 ;;
@@ -64,7 +70,7 @@ artifact_visible() {  # $1=artifact JSON
       else
         # GH Packages npm：package_name 用完整 scoped 名 URL-encode（@aster-cloud%2Fxxx）。
         local enc; enc=$(jq -rn --arg v "$npm" '$v|@uri')
-        GH_TOKEN="$VIS_TOKEN" gh api "orgs/$ORG/packages/npm/$enc/versions" -q '.[].name' 2>/dev/null | grep -qx "$ver"
+        GH_TOKEN="$VIS_TOKEN" gh api "orgs/$PKG_ORG/packages/npm/$enc/versions" -q '.[].name' 2>/dev/null | grep -qx "$ver"
         return $?
       fi ;;
     service) return 0 ;;  # service 无 registry 版本，可见性由 deploy run 成功代表（见 run_step）
@@ -88,12 +94,12 @@ all_artifacts_visible() {  # $1=step JSON
 wait_tag_commit() {  # repo, tag
   local repo="$1" tag="$2" i typ sha
   for ((i=0;i<POLL_MAX;i++)); do
-    typ=$(gh api "repos/$ORG/$repo/git/refs/tags/$tag" -q '.object.type' 2>/dev/null || true)
+    typ=$(gh api "repos/$REPO_ORG/$repo/git/refs/tags/$tag" -q '.object.type' 2>/dev/null || true)
     if [ "$typ" = "commit" ]; then
-      gh api "repos/$ORG/$repo/git/refs/tags/$tag" -q '.object.sha'; return 0
+      gh api "repos/$REPO_ORG/$repo/git/refs/tags/$tag" -q '.object.sha'; return 0
     elif [ "$typ" = "tag" ]; then
-      sha=$(gh api "repos/$ORG/$repo/git/refs/tags/$tag" -q '.object.sha')
-      gh api "repos/$ORG/$repo/git/tags/$sha" -q '.object.sha'; return 0
+      sha=$(gh api "repos/$REPO_ORG/$repo/git/refs/tags/$tag" -q '.object.sha')
+      gh api "repos/$REPO_ORG/$repo/git/tags/$sha" -q '.object.sha'; return 0
     fi
     sleep "$POLL_INTERVAL"
   done
@@ -105,13 +111,13 @@ wait_tag_commit() {  # repo, tag
 wait_publish_run() {  # repo, workflow, commit_sha, since_iso
   local repo="$1" workflow="$2" commit="$3" since="$4" i run status concl
   for ((i=0;i<POLL_MAX;i++)); do
-    run=$(gh api --method GET "repos/$ORG/$repo/actions/workflows/$workflow/runs" \
+    run=$(gh api --method GET "repos/$REPO_ORG/$repo/actions/workflows/$workflow/runs" \
             -f event=push -f head_sha="$commit" -f created=">=$since" -f per_page=100 \
             -q '.workflow_runs | sort_by(.created_at) | last | .id' 2>/dev/null || true)
     if [ -n "$run" ] && [ "$run" != "null" ]; then
-      status=$(gh api "repos/$ORG/$repo/actions/runs/$run" -q '.status' 2>/dev/null || true)
+      status=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.status' 2>/dev/null || true)
       if [ "$status" = "completed" ]; then
-        concl=$(gh api "repos/$ORG/$repo/actions/runs/$run" -q '.conclusion')
+        concl=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.conclusion')
         [ "$concl" = "success" ] && { log "  publish run $run success"; return 0; }
         log "::error::publish run $run conclusion=$concl"; return 1
       fi
@@ -125,13 +131,13 @@ wait_publish_run() {  # repo, workflow, commit_sha, since_iso
 wait_dispatch_run() {  # repo, workflow, since_iso
   local repo="$1" workflow="$2" since="$3" i run status concl
   for ((i=0;i<POLL_MAX;i++)); do
-    run=$(gh api --method GET "repos/$ORG/$repo/actions/workflows/$workflow/runs" \
+    run=$(gh api --method GET "repos/$REPO_ORG/$repo/actions/workflows/$workflow/runs" \
             -f event=workflow_dispatch -f created=">=$since" -f per_page=100 \
             -q '.workflow_runs | sort_by(.created_at) | last | .id' 2>/dev/null || true)
     if [ -n "$run" ] && [ "$run" != "null" ]; then
-      status=$(gh api "repos/$ORG/$repo/actions/runs/$run" -q '.status' 2>/dev/null || true)
+      status=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.status' 2>/dev/null || true)
       if [ "$status" = "completed" ]; then
-        concl=$(gh api "repos/$ORG/$repo/actions/runs/$run" -q '.conclusion')
+        concl=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.conclusion')
         [ "$concl" = "success" ] && { log "  dispatch run $run success"; return 0; }
         log "::error::dispatch run $run conclusion=$concl"; return 1
       fi
@@ -144,6 +150,8 @@ wait_dispatch_run() {  # repo, workflow, since_iso
 run_step() {  # $1 = step JSON
   local step="$1" repo workflow version ids kinds since tag commit
   repo=$(jq -r '.repo' <<<"$step")
+  # ★按 step 覆写仓库 org（coalesce.py 从 release-plan 的 artifact.org 带出，缺省 aster-cloud）
+  REPO_ORG=$(jq -r '.org // "aster-cloud"' <<<"$step")
   workflow=$(jq -r '.workflow' <<<"$step")
   version=$(jq -r '.version // empty' <<<"$step")
   ids=$(jq -r '.artifactIds | join(",")' <<<"$step")
@@ -154,8 +162,8 @@ run_step() {  # $1 = step JSON
   if [ "$kinds" = "service" ] || [ -z "$version" ]; then
     if [ "$DRY" = "true" ]; then log "  [dry-run] would dispatch+wait $repo/$workflow (service deploy)"; return 0; fi
     since=$(since_iso)
-    gh workflow run "$workflow" --repo "$ORG/$repo" --ref main -f trainId="$TRAIN_ID" 2>/dev/null \
-      || gh workflow run "$workflow" --repo "$ORG/$repo" --ref main
+    gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main -f trainId="$TRAIN_ID" 2>/dev/null \
+      || gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main
     log "  dispatched service deploy; waiting for deploy run ..."
     sleep 5
     wait_dispatch_run "$repo" "$workflow" "$since"
@@ -180,13 +188,13 @@ run_step() {  # $1 = step JSON
   fi
 
   if [ "$DRY" = "true" ]; then
-    log "  [dry-run] would: gh workflow run $workflow --repo $ORG/$repo --ref main -f version=$version -f artifactIds=$ids -f trainId=$TRAIN_ID"
+    log "  [dry-run] would: gh workflow run $workflow --repo $REPO_ORG/$repo --ref main -f version=$version -f artifactIds=$ids -f trainId=$TRAIN_ID"
     log "  [dry-run] then wait tag $tag → wait push run → wait ALL artifacts visible"
     return 0
   fi
 
   since=$(since_iso)
-  gh workflow run "$workflow" --repo "$ORG/$repo" --ref main \
+  gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main \
     -f version="$version" -f artifactIds="$ids" -f trainId="$TRAIN_ID"
   log "  dispatched; waiting for tag $tag ..."
   commit=$(wait_tag_commit "$repo" "$tag")
