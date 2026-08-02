@@ -7,7 +7,8 @@
 # 等 tag-push release run 完成 → 等制品 registry 可见 → 进下一层。失败即停（forward-only，
 # 已发布制品不回收）。dryRun 只打印计划不真发。
 #
-# 前置：secret CROSS_REPO_TOKEN（classic PAT，scope repo + read:packages；跨仓
+# 前置：secret CROSS_REPO_TOKEN（**fine-grained** PAT——实测 token 前缀 github_pat_、
+# 无 x-oauth-scopes 响应头；此处原注释误写为 classic，已更正。跨仓
 # workflow_dispatch + 轮询 runs + 读 GH Packages 可见性）。
 #
 # 关键设计（Codex 交叉审查固化，见 ADR 0023 §4.2/§幂等）：

@@ -49,6 +49,9 @@ def main() -> int:
             primary = sorted(arts, key=lambda a: KIND_PRIORITY.get(a["kind"], 9))[0]
             steps.append({
                 "repo": repo,
+                # org 缺省 aster-cloud；aster-api 于 2026-08 迁至 wontlost-ltd。
+                # 组内同 repo 故 org 必一致，取 primary 的即可。
+                "org": primary.get("org", "aster-cloud"),
                 "workflow": workflow,
                 "version": primary["expectedVersion"],
                 "artifactIds": [a["id"] for a in arts],
