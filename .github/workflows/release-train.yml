@@ -76,18 +76,29 @@ jobs:
           set -euo pipefail
           PLAN=release-plan.json
           fail=0
-          # artifact → repo 映射从 plan 读
+          # artifact → (repo, org) 映射从 plan 读。
+          # ★org 缺省 aster-cloud；aster-api 于 2026-08 迁至 wontlost-ltd 并转私。
+          #   此前这里把 org 硬编码成 aster-cloud，clone 得 403
+          #   "Write access to repository not granted"，而 `>/dev/null 2>&1` 把它吞掉，
+          #   只在 job 层表现为 exit 128——无任何指向根因的信息。现在失败即打印真因。
           mapfile -t ROWS < <(python3 -c "
           import json
           d=json.load(open('$PLAN'))
           for a in d['artifacts']:
-              print(a['id'], a['repo'])
+              print(a['id'], a['repo'], a.get('org', 'aster-cloud'))
           ")
           declare -A CLONED
           for row in "${ROWS[@]}"; do
-            ID="${row%% *}"; REPO="${row##* }"
+            read -r ID REPO ORG <<< "$row"
             if [ -z "${CLONED[$REPO]:-}" ]; then
-              git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/aster-cloud/${REPO}.git" "/tmp/$REPO" >/dev/null 2>&1
+              if ! git clone --depth 1 \
+                   "https://x-access-token:${GH_TOKEN}@github.com/${ORG}/${REPO}.git" \
+                   "/tmp/$REPO" 2>/tmp/clone-err; then
+                echo "::error::[$ID] clone ${ORG}/${REPO} 失败（下方为 git 原始报错，token 已脱敏）："
+                sed "s#${GH_TOKEN}#***#g" /tmp/clone-err >&2
+                fail=1
+                continue
+              fi
               CLONED[$REPO]=1
             fi
             if ! python3 scripts/release-plan/check-artifact.py --plan "$PLAN" --artifact "$ID" --repo-root "/tmp/$REPO"; then

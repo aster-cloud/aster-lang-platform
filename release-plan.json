@@ -181,11 +181,13 @@
     {
       "id": "aster-api:service",
       "repo": "aster-api",
+      "org": "wontlost-ltd",
       "kind": "service",
       "versionSource": "none",
       "expectedVersion": null,
       "expectedPlatformPin": "1.0.17",
       "releaseWorkflow": "deploy.yml"
     }
-  ]
+  ],
+  "$orgComment": "artifact.org 可选，缺省 aster-cloud。aster-api 于 2026-08 迁至 wontlost-ltd 并转私，此前 gate 把 org 硬编码成 aster-cloud，导致 clone 403（fatal: Write access to repository not granted）——且该错误被 `>/dev/null 2>&1` 吞掉，只表现为 exit 128。"
 }
