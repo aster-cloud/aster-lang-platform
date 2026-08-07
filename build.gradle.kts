@@ -33,7 +33,10 @@ group = "cloud.aster-lang"
 // lockstep 生态 → asterLang 1.0.14→1.0.17，platform 自身 1.0.16→1.0.17（追平）。
 // 1.0.18：core 生产词法器补天城文、truffle NameNode slot 读取修复 + AsyncTaskRegistry
 // 线程池泄漏、ts eval-parity 转 PR-blocking。platform 与生态号继续保持一致。
-version = "1.0.18"
+// 1.0.19：aster-api /evaluate-source 并发闸门可被取消绕过（许可挂 onTermination，
+// HTTP 取消立刻归还而 worker 仍在跑 → 反复「发起再取消」可绕过闸门）。许可归还
+// 收敛为 PermitLease 的 CAS 一次性租约。本仓无代码改动，随生态 lockstep 对齐。
+version = "1.0.19"
 
 catalog {
     versionCatalog {
@@ -44,7 +47,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.18")
+        version("asterLang", "1.0.19")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
