@@ -36,7 +36,11 @@ group = "cloud.aster-lang"
 // 1.0.19：aster-api /evaluate-source 并发闸门可被取消绕过（许可挂 onTermination，
 // HTTP 取消立刻归还而 worker 仍在跑 → 反复「发起再取消」可绕过闸门）。许可归还
 // 收敛为 PermitLease 的 CAS 一次性租约。本仓无代码改动，随生态 lockstep 对齐。
-version = "1.0.19"
+// 1.0.20：truffle 两项修复随生态 lockstep 发布——(1) 步骤级 trace 带源码行号
+// （条件漏斗按行号分组/排序，truffle#64）；(2) 成员访问失败时列出可用键名，
+// 不再把「键名对不上」误导成 HostAccess 配置问题（truffle#65 / api#244）；
+// 另 GraalVM 组件收敛到 25.0.4，消除 25.0.1/25.0.3/25.0.4 三版本混用（api#193）。
+version = "1.0.20"
 
 catalog {
     versionCatalog {
@@ -47,7 +51,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.19")
+        version("asterLang", "1.0.20")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
