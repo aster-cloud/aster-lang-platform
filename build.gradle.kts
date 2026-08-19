@@ -49,7 +49,15 @@ group = "cloud.aster-lang"
 //   「生态 lockstep 发版，七个仓共用同一个版本号与 tag 名」。
 //   分离两个版本轴会打破这个不变量，使 api 找不到对应 tag 的兄弟仓源码。
 //   故本次按原设计走完整生态列车：platform / asterLang / ecosystemVersion 同为 1.0.21。
-version = "1.0.21"
+//
+// 1.0.22：补丁列车，唯一实质内容是把 ui-messages 的 evidenceExport 四语文案
+//   （aster-lang-locales#60 / aster-lang-hi#57，issue #260 遗留）带到 tag 上。
+//
+//   ★为什么不能直接移动 v1.0.21：aster-api 的 sibling parity 门禁比对的是
+//   CI 检出的**兄弟仓 tag**，而 v1.0.21 的制品已发布到 GH Packages。
+//   移 tag 会让「tag 指向的源码」与「同名不可变制品」永久对不上——
+//   这正是 sibling-ref 钉版本要消除的那类不确定性。故只能向前发新版。
+version = "1.0.22"
 
 catalog {
     versionCatalog {
@@ -60,7 +68,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.21")
+        version("asterLang", "1.0.22")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
