@@ -41,9 +41,14 @@ group = "cloud.aster-lang"
 // 不再把「键名对不上」误导成 HostAccess 配置问题（truffle#65 / api#244）；
 // 另 GraalVM 组件收敛到 25.0.4，消除 25.0.1/25.0.3/25.0.4 三版本混用（api#193）。
 //
-// 1.0.21：仅目录自身发版 —— 新增 graalvm 版本与 7 个组件别名（api#193）。
-// ★asterLang 保持 1.0.20 不动：它是「各 JVM 模块已发布基线」，本次没有任何
-//   模块重新发版，抬它会谎称生态整体 re-tag。目录自身版本与 asterLang 解耦。
+// 1.0.21：新增 graalvm 版本与 7 个组件别名（api#193），并随生态 lockstep 发版。
+//
+// ★订正上一版的判断：我曾只抬目录自身 version、把 asterLang 留在 1.0.20，
+//   理由是「没有模块重新发版」。但 aster-api 的 CI 有一处刻意设计——
+//   setup-aster-build 的 sibling-ref 默认 v1.0.20，注释写明
+//   「生态 lockstep 发版，七个仓共用同一个版本号与 tag 名」。
+//   分离两个版本轴会打破这个不变量，使 api 找不到对应 tag 的兄弟仓源码。
+//   故本次按原设计走完整生态列车：platform / asterLang / ecosystemVersion 同为 1.0.21。
 version = "1.0.21"
 
 catalog {
@@ -55,7 +60,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.20")
+        version("asterLang", "1.0.21")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
