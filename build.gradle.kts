@@ -40,7 +40,11 @@ group = "cloud.aster-lang"
 // （条件漏斗按行号分组/排序，truffle#64）；(2) 成员访问失败时列出可用键名，
 // 不再把「键名对不上」误导成 HostAccess 配置问题（truffle#65 / api#244）；
 // 另 GraalVM 组件收敛到 25.0.4，消除 25.0.1/25.0.3/25.0.4 三版本混用（api#193）。
-version = "1.0.20"
+//
+// 1.0.21：仅目录自身发版 —— 新增 graalvm 版本与 7 个组件别名（api#193）。
+// ★asterLang 保持 1.0.20 不动：它是「各 JVM 模块已发布基线」，本次没有任何
+//   模块重新发版，抬它会谎称生态整体 re-tag。目录自身版本与 asterLang 解耦。
+version = "1.0.21"
 
 catalog {
     versionCatalog {
