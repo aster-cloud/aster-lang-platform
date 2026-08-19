@@ -66,12 +66,29 @@ catalog {
         version("antlr", "4.13.1")     // ANTLR tool + runtime (aster-lang-core)
         version("assertj", "3.27.7")   // newest present: 3.27.3 / 3.27.6 / 3.27.7 across consumers
 
+        // ★GraalVM：全部组件必须 lockstep（aster-api#193）。
+        //   混搭版本的典型症状是 NoClassDefFoundError → ExceptionInInitializerError
+        //   at Engine.java:559（实测于单独升 polyglot 的 PR）。
+        //   此前 aster-api 与 aster-lang-truffle 各自硬编码字面量，
+        //   曾出现 api 内部 25.0.3/25.0.4 混用 + 跨仓 25.0.1 落后。
+        //   收进目录后由此处统一，消费仓改用 asterLibs.graalvm.* 别名。
+        version("graalvm", "25.0.4")
+
         // ===== libraries (all reference the version above) =====
         library("core", "cloud.aster-lang", "aster-lang-core").versionRef("asterLang")
         library("runtime", "cloud.aster-lang", "aster-lang-runtime").versionRef("asterLang")
         library("truffle", "cloud.aster-lang", "aster-lang-truffle").versionRef("asterLang")
         library("validation", "cloud.aster-lang", "aster-lang-validation").versionRef("asterLang")
         library("test", "cloud.aster-lang", "aster-lang-test").versionRef("asterLang")
+
+        // GraalVM / Truffle 组件（全部 versionRef("graalvm")，保证 lockstep）
+        library("graalvm-polyglot", "org.graalvm.polyglot", "polyglot").versionRef("graalvm")
+        library("graalvm-sdk", "org.graalvm.sdk", "graal-sdk").versionRef("graalvm")
+        library("graalvm-truffle-api", "org.graalvm.truffle", "truffle-api").versionRef("graalvm")
+        library("graalvm-truffle-runtime", "org.graalvm.truffle", "truffle-runtime").versionRef("graalvm")
+        library("graalvm-truffle-compiler", "org.graalvm.truffle", "truffle-compiler").versionRef("graalvm")
+        library("graalvm-truffle-dsl-processor", "org.graalvm.truffle", "truffle-dsl-processor").versionRef("graalvm")
+        library("graalvm-compiler", "org.graalvm.compiler", "compiler").versionRef("graalvm")
 
         // Locale packs from aster-lang-locales (multi-module).
         // 新坐标 aster-lang-locales-{en,zh,de}：从 aster-lang-locales 仓发布（自有坐标，
