@@ -1,0 +1,112 @@
+name: Checkout sibling repo (ref-matched)
+description: >
+  检出兄弟仓，并按当前构建的语境自动选择 ref，避免「拿移动目标构建」。
+
+  三条解析规则，按优先级：
+    1. tag 构建（github.ref 形如 refs/tags/vX）→ 兄弟仓同名 tag vX；
+    2. PR 构建（github.head_ref 非空）→ 兄弟仓同名分支；
+    3. 都不匹配 → fallback-ref（默认 main）。
+
+  规则 1 是发版路径的正确性要求：release 由 tag 触发，若兄弟仓仍取 main，
+  等于「发 vX 却拿兄弟仓 main 的代码构建」——列车运行期间只要有 PR 合进
+  兄弟仓 main，发出去的制品就与 tag 指向的源码对不上。
+
+  规则 2 让跨仓改动在合并前就能相互验证，而不是各自对着兄弟仓的 main 测。
+
+  ★无论走哪条规则都会把结果写进日志与 step output（resolved-ref / matched-by）。
+  回落是**正常且必要**的（生态里存在三处倒序依赖：core→locales/test、
+  truffle→ts，被依赖方的 tag 晚于依赖方建立，发版时只能取 main），
+  但回落必须**可见**——静默回落正是此前两类竞态长期无人察觉的原因。
+
+inputs:
+  repository:
+    description: 兄弟仓 owner/name（如 aster-cloud/aster-lang-core）
+    required: true
+  path:
+    description: 本地检出路径
+    required: true
+  token:
+    description: 有该兄弟仓读权限的 token
+    required: true
+  fallback-ref:
+    description: 前两条规则都不匹配时使用的 ref
+    required: false
+    default: main
+  fetch-depth:
+    description: 传给 actions/checkout 的 fetch-depth
+    required: false
+    default: '1'
+
+outputs:
+  resolved-ref:
+    description: 实际检出的 ref
+    value: ${{ steps.resolve.outputs.ref }}
+  matched-by:
+    description: 命中的规则（tag / branch / fallback）
+    value: ${{ steps.resolve.outputs.matched_by }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve matching ref
+      id: resolve
+      shell: bash
+      env:
+        # head_ref 仅在 pull_request 事件非空（PR 的源分支）；
+        # tag push 时 GITHUB_REF 形如 refs/tags/v1.0.22。
+        HEAD_REF: ${{ github.head_ref }}
+        GITHUB_REF_INPUT: ${{ github.ref }}
+        REPO: ${{ inputs.repository }}
+        FALLBACK: ${{ inputs.fallback-ref }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+        # 探测兄弟仓是否存在某个 ref。token 只经环境变量进 URL，
+        # 不出现在命令行参数里（ps 可见）。
+        has_ref() {
+          git ls-remote --exit-code "$1" "$remote" "$2" >/dev/null 2>&1
+        }
+
+        ref="$FALLBACK"
+        matched_by="fallback"
+
+        case "${GITHUB_REF_INPUT:-}" in
+          refs/tags/*)
+            tag="${GITHUB_REF_INPUT#refs/tags/}"
+            if has_ref --tags "refs/tags/${tag}"; then
+              ref="$tag"; matched_by="tag"
+              echo "✅ 命中兄弟仓同名 tag '${tag}' in ${REPO}"
+            else
+              # 倒序依赖的正常情形：被依赖方的 tag 尚未建立。
+              echo "⚠️  ${REPO} 无 tag '${tag}'；回落 '${FALLBACK}'（倒序依赖或该仓不参与本次发版）"
+            fi
+            ;;
+          *)
+            if [ -n "${HEAD_REF:-}" ]; then
+              if has_ref --heads "refs/heads/${HEAD_REF}"; then
+                ref="$HEAD_REF"; matched_by="branch"
+                echo "✅ 命中兄弟仓同名分支 '${HEAD_REF}' in ${REPO}"
+              else
+                echo "ℹ️  ${REPO} 无分支 '${HEAD_REF}'；回落 '${FALLBACK}'"
+              fi
+            else
+              echo "ℹ️  非 PR 且非 tag 构建；使用 '${FALLBACK}'"
+            fi
+            ;;
+        esac
+
+        echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+        echo "matched_by=${matched_by}" >> "$GITHUB_OUTPUT"
+        echo "${REPO} → ${ref} (${matched_by})" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.repository }}
+        path: ${{ inputs.path }}
+        ref: ${{ steps.resolve.outputs.ref }}
+        token: ${{ inputs.token }}
+        fetch-depth: ${{ inputs.fetch-depth }}
