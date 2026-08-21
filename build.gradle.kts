@@ -57,7 +57,17 @@ group = "cloud.aster-lang"
 //   CI 检出的**兄弟仓 tag**，而 v1.0.21 的制品已发布到 GH Packages。
 //   移 tag 会让「tag 指向的源码」与「同名不可变制品」永久对不上——
 //   这正是 sibling-ref 钉版本要消除的那类不确定性。故只能向前发新版。
-version = "1.0.22"
+//
+// 1.0.23：把 aster-lang-ts#112 的 stdlib 补齐送到 npm —— Text.substring /
+//   Text.replace / List.slice / Maybe.unwrap / Result.unwrap / Result.unwrapErr
+//   此前只有 JVM 引擎有，TS 侧缺失，而文档站演练场跑的正是 TS 引擎，
+//   用户照文档抄必撞 Undefined function（aster-dev#22）。
+//   其余各仓的未发版 commit 都是 CI 管道（共享 checkout-sibling），不改制品行为。
+//
+//   ★ui-messages 的 npm 版本同步抬到 1.0.18：它是 literal 版本且 1.0.17 已发布，
+//   而 locales/hi 是 maven+npm 双制品共用一个 release.yml —— maven 1.0.23 不可见
+//   必然触发 dispatch，连带重发 npm，撞重复版本即断层（1.0.22 已踩过）。
+version = "1.0.23"
 
 catalog {
     versionCatalog {
@@ -68,7 +78,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.22")
+        version("asterLang", "1.0.23")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
