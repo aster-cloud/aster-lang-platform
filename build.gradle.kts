@@ -80,7 +80,15 @@ group = "cloud.aster-lang"
 //   ★List.groupBy 自己造键、绕过 mapKey，null 分组键与字符串 "null" 塌陷同桶
 //     （truffle#87 / ts#117），顺带修掉 groupBy 的 1 vs 1.0 分组分叉。
 //   语料补 struct_list_equality 作跨引擎守门（test#90）——此前唯一的相等用例只喂标量。
-version = "1.0.25"
+//
+// 1.0.26：ADR 0035 档位 C —— **破坏性语义变更**。
+//   ★Map.get 不再返回裸值/null，改为 Some(value) / None。
+//     明知破坏 spec-1.0-freeze 的「Stable 1.x 内语义不变」承诺，由用户拍板接受
+//     （真实用量仅 3 个 corpus 文件，已逐一核实）。
+//   配套：List.* 对非列表输入改为响亮失败（此前 TS 静默返回 0/true/null，
+//     Java 一律 throw —— 既是双引擎分叉也是静默错答案）。
+//   至此档位 B（编译期警告）判定为不必要：其四种目标情形已全部响亮失败。
+version = "1.0.26"
 
 catalog {
     versionCatalog {
@@ -91,7 +99,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.25")
+        version("asterLang", "1.0.26")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
