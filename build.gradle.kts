@@ -73,7 +73,14 @@ group = "cloud.aster-lang"
 //     占死线程 101 秒（truffle#84 / ts#114）。
 //   其余：#73 实参不再写入共享 globalEnv、api#244 标量参数错误信息指向真因、
 //   #74 第 1 项 Map 拒绝 null 键（ADR 0035 档位 A）、valueEquals 深度上限双引擎对齐。
-version = "1.0.24"
+//
+// 1.0.25：二轮深度审查修的两条**双引擎分叉**。
+//   ★is equal to 对结构体/列表两侧结果不同（TS 引用相等 false / Java 结构相等 true）
+//     —— 同一条规则在两套引擎给出不同决策。统一为结构相等（ts#117）。
+//   ★List.groupBy 自己造键、绕过 mapKey，null 分组键与字符串 "null" 塌陷同桶
+//     （truffle#87 / ts#117），顺带修掉 groupBy 的 1 vs 1.0 分组分叉。
+//   语料补 struct_list_equality 作跨引擎守门（test#90）——此前唯一的相等用例只喂标量。
+version = "1.0.25"
 
 catalog {
     versionCatalog {
@@ -84,7 +91,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.24")
+        version("asterLang", "1.0.25")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
