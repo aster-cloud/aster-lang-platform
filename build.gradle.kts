@@ -67,7 +67,13 @@ group = "cloud.aster-lang"
 //   ★ui-messages 的 npm 版本同步抬到 1.0.18：它是 literal 版本且 1.0.17 已发布，
 //   而 locales/hi 是 maven+npm 双制品共用一个 release.yml —— maven 1.0.23 不可见
 //   必然触发 dispatch，连带重发 npm，撞重复版本即断层（1.0.22 已踩过）。
-version = "1.0.23"
+//
+// 1.0.24：安全 + 正确性补丁列车。
+//   ★ReDoS（CodeQL high）：scale 校验正则的歧义分支，宿主传入 2 万字符即可
+//     占死线程 101 秒（truffle#84 / ts#114）。
+//   其余：#73 实参不再写入共享 globalEnv、api#244 标量参数错误信息指向真因、
+//   #74 第 1 项 Map 拒绝 null 键（ADR 0035 档位 A）、valueEquals 深度上限双引擎对齐。
+version = "1.0.24"
 
 catalog {
     versionCatalog {
@@ -78,7 +84,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.23")
+        version("asterLang", "1.0.24")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
