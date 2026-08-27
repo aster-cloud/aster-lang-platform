@@ -124,7 +124,7 @@
       "repo": "aster-lang-locales",
       "kind": "npm",
       "versionSource": "literal",
-      "expectedVersion": "1.0.21",
+      "expectedVersion": "1.0.22",
       "expectedPlatformPin": "1.0.26",
       "artifactPath": "ui-messages",
       "releaseWorkflow": "release.yml",
