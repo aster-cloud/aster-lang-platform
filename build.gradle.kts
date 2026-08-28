@@ -98,7 +98,15 @@ group = "cloud.aster-lang"
 //   aster-api classpath 副本同步（api#290）。副本与源的 lockstep parity 测试比对
 //   的是 sibling tag，故必须切新 tag 才能让副本与源同时上线。
 //   引擎/语义零改动——本版只为把文案送上生产。
-version = "1.0.27"
+//
+// 1.0.28：文案同步发版（无语义变更）。
+//   新增 AI 拒绝原因文案 8 键（ai.error* + goVerifyEmail）。
+//   用户报「点 AI 生成只在控制台看到 403，界面无原因」——服务端早已给出精确
+//   原因码，前端此前把响应体当纯文本，用户读不到（cloud#438 已修解析）。
+//   但**线上实际显示什么由 aster-api 的 /api/v1/messages 决定**（它优先于 npm 包），
+//   故必须同步 classpath 副本（api#292）并重新部署；副本受 lockstep parity 约束
+//   （比对 sibling tag），必须切新 tag。引擎/语义零改动。
+version = "1.0.28"
 
 catalog {
     versionCatalog {
@@ -109,7 +117,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.27")
+        version("asterLang", "1.0.28")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
