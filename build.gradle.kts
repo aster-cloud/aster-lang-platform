@@ -88,7 +88,17 @@ group = "cloud.aster-lang"
 //   配套：List.* 对非列表输入改为响亮失败（此前 TS 静默返回 0/true/null，
 //     Java 一律 throw —— 既是双引擎分叉也是静默错答案）。
 //   至此档位 B（编译期警告）判定为不必要：其四种目标情形已全部响亮失败。
-version = "1.0.26"
+//
+// 1.0.27：文案同步发版（无语义变更）。
+//   线上 /signup 长期渲染裸 key（auth.signup.emailLabel 等）。根因不是缓存、
+//   也不是 npm 包没发：cloud 的加载顺序是 KV → 后端 /api/v1/messages → 内嵌 npm 包，
+//   **后端优先级最高**，而 aster-api 的 classpath 副本停在旧版。
+//   实测生产 API 只返回 12 个 signup key、无 auth.verifyEmail、无 auditUnlimited。
+//   本次：locales/hi 真相源补 auditUnlimited 与 161 条印地语翻译（四语各 2436 叶子），
+//   aster-api classpath 副本同步（api#290）。副本与源的 lockstep parity 测试比对
+//   的是 sibling tag，故必须切新 tag 才能让副本与源同时上线。
+//   引擎/语义零改动——本版只为把文案送上生产。
+version = "1.0.27"
 
 catalog {
     versionCatalog {
@@ -99,7 +109,7 @@ catalog {
         // normalization + Validator). The catalog uses one version for all, so every
         // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
         // no code change — they re-release only to keep the ecosystem catalog uniform).
-        version("asterLang", "1.0.26")
+        version("asterLang", "1.0.27")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
