@@ -112,11 +112,16 @@ catalog {
     versionCatalog {
         // ===== single source of truth for ecosystem versions =====
         // Current published baseline of every first-party JVM module.
-        // 1.0.4 ecosystem-wide for the keyword-alias-mechanism release (ADR 0022 Plan D):
-        // core gained the recognition-side alias mechanism (getAliases + Canonicalizer
-        // normalization + Validator). The catalog uses one version for all, so every
-        // module is re-tagged 1.0.4 in lockstep (runtime/truffle/validation/locales carry
-        // no code change — they re-release only to keep the ecosystem catalog uniform).
+        //
+        // ★这里只写“机制”，不写具体版本号的来历（issue #76）。
+        //   此前这段写的是「1.0.4 ecosystem-wide for the keyword-alias-mechanism
+        //   release」，而下面的值早已是 1.0.28 —— 注释描述的是某一次历史发版，
+        //   却紧挨着一个完全不同的当前值，第一次读到这里的人会被误导。
+        //   版本演进史留在文件头 changelog 一处即可，不要在声明处复述。
+        //
+        // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
+        // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
+        // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
         version("asterLang", "1.0.28")
 
         // ===== third-party ecosystem versions =====
