@@ -47,9 +47,23 @@ jobs:
           # autodiscover 限定到全生态有 platform pin 的 6 个仓（避免扫无关仓）。
           # pin 仓 = api/core/truffle/locales/hi；platform 自身纳入以便未来 self-update。
           # ★用 regex 而非 brace-glob：env var 里逗号会被当成 filter 分隔符（官方文档），
-          #   brace 列表会被拆散。regex 形如 /aster-cloud\/(repo1|repo2|...)/。
+          #   brace 列表会被拆散。regex 形如 /(orgA|orgB)\/(repo1|repo2|...)/。
+          #
+          # ★★org 部分必须同时匹配 aster-cloud 与 wontlost-ltd（wontlost-ltd/aster-api#80）：
+          #   aster-api 已转移到 wontlost-ltd。GitHub 会把旧路径**重定向**到新仓
+          #   （两边 repo id 相同，gh api 照常可达），所以从「能不能访问」看不出问题；
+          #   但 autodiscover 是拿**当前 full_name** 去匹配 filter 的 ——
+          #   转移后它是 wontlost-ltd/aster-api，被 ^aster-cloud\/ 直接拒掉。
+          #
+          #   实测证据（run 33381032968 的 "Autodiscovered repositories"）：
+          #     只有 5 个 —— core / hi / locales / platform / truffle，**aster-api 不在其中**。
+          #   后果：aster-api 的 platform pin 自 2026-07-20 起再未被 Renovate 检查，
+          #   其 Dependency Dashboard 也停在那天（看起来"一切正常，只是没有更新"）。
+          #
+          #   ★这类失效**没有任何报错**：Renovate 只是少扫一个仓，日志全绿。
+          #     判据是数「Autodiscovered repositories 列了几个」，而不是看有没有报错。
           RENOVATE_AUTODISCOVER: 'true'
-          RENOVATE_AUTODISCOVER_FILTER: '/^aster-cloud\/(aster-lang-platform|aster-api|aster-lang-core|aster-lang-truffle|aster-lang-locales|aster-lang-hi)$/'
+          RENOVATE_AUTODISCOVER_FILTER: '/^(aster-cloud|wontlost-ltd)\/(aster-lang-platform|aster-api|aster-lang-core|aster-lang-truffle|aster-lang-locales|aster-lang-hi)$/'
           # GH Packages 私有 Maven 认证：实测发现 platform token **不会**自动覆盖
           # maven.pkg.github.com（日志 "hostRules: no authentication" + 401）——
           # 与文档"自动 provision"表述相反，自托管下 Maven datasource 需显式 hostRule。
