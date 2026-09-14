@@ -99,6 +99,13 @@ group = "cloud.aster-lang"
 //   的是 sibling tag，故必须切新 tag 才能让副本与源同时上线。
 //   引擎/语义零改动——本版只为把文案送上生产。
 //
+// 1.0.29：引擎缺陷修复发版。
+//   core：BOM 剥离（#158）、连续 not 深度守卫（#157）、组合记号纳入词边界
+//   判定（hi#73，修 Hindi 标识符被关键词词内替换）。ts 侧同步 BOM 列号对齐、
+//   LSP 租户词汇注册抽成可测模块（#161）。另含 ADR-0037 mapping 层（MappingIR/
+//   ProofIR/SourceIR/QuantityIR verifier、Stable Node ID、显式 rename 声明）与
+//   ReDoS 加固——均为内部 IR 层，未改公开 CNL 语法，故取补丁位。
+//
 // 1.0.28：文案同步发版（无语义变更）。
 //   新增 AI 拒绝原因文案 8 键（ai.error* + goVerifyEmail）。
 //   用户报「点 AI 生成只在控制台看到 403，界面无原因」——服务端早已给出精确
@@ -106,7 +113,7 @@ group = "cloud.aster-lang"
 //   但**线上实际显示什么由 aster-api 的 /api/v1/messages 决定**（它优先于 npm 包），
 //   故必须同步 classpath 副本（api#292）并重新部署；副本受 lockstep parity 约束
 //   （比对 sibling tag），必须切新 tag。引擎/语义零改动。
-version = "1.0.28"
+version = "1.0.29"
 
 catalog {
     versionCatalog {
@@ -122,7 +129,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.28")
+        version("asterLang", "1.0.29")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
