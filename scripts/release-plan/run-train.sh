@@ -167,7 +167,24 @@ wait_dispatch_run() {  # repo, workflow, since_iso
     fi
     sleep "$POLL_INTERVAL"
   done
-  log "::error::$repo/$workflow 的 dispatch run 未在超时内完成"; return 1
+
+  # ★判超时前**再查一次终态**（issue #82）：轮询是离散的，run 可能恰好在最后一次
+  #   sleep 期间完成。1.0.29 实测：deploy 21:38:24 success，列车 21:38:42 判超时——
+  #   差 18 秒，把一次成功的部署报成了失败。
+  run=$(gh api --method GET "repos/$REPO_ORG/$repo/actions/workflows/$workflow/runs" \
+          -f event=workflow_dispatch -f created=">=$since" -f per_page=100 \
+          -q '.workflow_runs | sort_by(.created_at) | last | .id' 2>/dev/null || true)
+  if [ -n "$run" ] && [ "$run" != "null" ]; then
+    status=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.status' 2>/dev/null || true)
+    if [ "$status" = "completed" ]; then
+      concl=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.conclusion')
+      [ "$concl" = "success" ] && { log "  dispatch run $run success (末轮补查)"; return 0; }
+      log "::error::dispatch run $run conclusion=$concl"; return 1
+    fi
+    log "::error::$repo/$workflow 的 dispatch run $run 未在超时内完成（末次状态=${status}）"
+    return 1
+  fi
+  log "::error::$repo/$workflow 的 dispatch run 未在超时内完成（且未找到对应 run）"; return 1
 }
 
 run_step() {  # $1 = step JSON
@@ -188,9 +205,23 @@ run_step() {  # $1 = step JSON
   if [ "$kinds" = "service" ] || [ -z "$version" ]; then
     if [ "$DRY" = "true" ]; then log "  [dry-run] would dispatch+wait $repo/$workflow (service deploy)"; return 0; fi
     since=$(since_iso)
-    gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main -f trainId="$TRAIN_ID" 2>/dev/null \
-      || gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main
-    log "  dispatched service deploy; waiting for deploy run ..."
+    # ★trainId 必须传进去，且传不进去要**报错**（issue #82）。
+    #
+    #   旧写法是 `-f trainId=... 2>/dev/null || <无参重试>`：deploy.yml 当时根本没定义
+    #   任何 workflow_dispatch input，于是带参 dispatch 必然失败、错误被 2>/dev/null 吞掉、
+    #   静默走无参 fallback。后果是被 dispatch 的 deploy **无从得知自己是列车触发的**，
+    #   其 image-pin-pr 只认 push 事件 → 静默 skip → 集群永不换版本，
+    #   而列车这头只看到一个「等待超时」。1.0.29 实测就是这样发出去的。
+    #
+    #   现在：传参失败即失败。宁可在这里红，也不要发完制品才发现集群没换版本。
+    if ! gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main \
+           -f trainId="$TRAIN_ID"; then
+      log "::error::dispatch $repo/$workflow 失败（带 trainId=${TRAIN_ID}）。"
+      log "::error::若报 'unexpected input', 说明该 workflow 未定义 trainId input——"
+      log "::error::它的 image-pin/部署闭环很可能只认 push 事件，列车触发不会真正生效。"
+      return 1
+    fi
+    log "  dispatched service deploy (trainId=$TRAIN_ID); waiting for deploy run ..."
     sleep 5
     wait_dispatch_run "$repo" "$workflow" "$since"
     return $?
