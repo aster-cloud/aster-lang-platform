@@ -10,14 +10,24 @@
 
 ## 本地验证 · Local Verification
 
+本仓只有一个生成的 TOML catalog，没有编译代码，也**没有 `test` 任务**。本地跑与
+CI（`.github/workflows/ci.yml`）相同的三道检查：
+
 ```bash
-./gradlew build     # 构建
-./gradlew test      # 测试
+# 1. 防漂移门禁：build.gradle.kts 的 version 必须等于 release-plan.json 的 platformVersion
+python3 scripts/release-plan/check-artifact.py --plan release-plan.json --artifact platform --repo-root .
+
+# 2. 构建并生成 catalog（校验 catalog DSL 与 publish 装配）
+./gradlew build generateCatalogAsToml
+cat build/version-catalog/libs.versions.toml
+
+# 3. 发布列车执行器的回归测试（仅当改了 scripts/release-plan/）
+bash scripts/release-plan/run-train.test.sh
 ```
 
-改动**必须**在本地跑通 `build` + `test` 后再提 PR。若本仓依赖 `aster-lang-core`
-等上游仓，跨仓构建前需先把上游发布到 mavenLocal（`./gradlew publishToMavenLocal`）。
-具体命令以 README 为准。
+改动**必须**在本地跑通以上检查后再提 PR。改了 catalog 内容（`asterLang` 或任何
+第三方版本）时，须同步 bump `version` 与 `release-plan.json`，步骤见
+[README · 升级生态版本](README.md#升级生态版本)。
 
 ## 提交流程 · Pull Request Flow
 
