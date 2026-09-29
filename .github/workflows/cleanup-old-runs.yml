@@ -6,8 +6,8 @@
 # 绝不删正在跑的）。跨所有 workflow、所有分支、所有状态。
 # 权限最小:仅 actions:write（删 run 所需）。
 #
-# ★本文件是全生态的唯一实现（issue #86）：其余 aster 仓不再各留一份逐字副本，
-#   而是通过 workflow_call 引用本文件——
+# ★本文件是全生态的参考实现（issue #86）并开放 workflow_call：其余 aster 仓目前仍各留
+#   一份副本（已同步修复），待本文件合入 main 后可逐仓改为一行引用——
 #     jobs:
 #       cleanup:
 #         uses: aster-cloud/aster-lang-platform/.github/workflows/cleanup-old-runs.yml@main
