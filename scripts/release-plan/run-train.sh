@@ -33,14 +33,19 @@ FROM="${FROM_LAYER:-0}"
 VIS_TOKEN="${VIS_TOKEN:-$GH_TOKEN}"   # 可见性查询 token（GITHUB_TOKEN），缺省退回 GH_TOKEN
 WONTLOST_TOKEN="${WONTLOST_TOKEN:-}"  # owner=wontlost-ltd 的 fine-grained PAT
 ASTER_CLOUD_TOKEN="$GH_TOKEN"         # 保留原始（GH_TOKEN 会被 token_for 改写）
-POLL_INTERVAL=20
-POLL_MAX=90   # 90 × 20s = 30min/项（Java/Gradle 冷缓存发布偏慢）
+# 轮询节奏可由 env 覆写（测试用短轮询驱动超时路径）；生产缺省 90 × 20s = 30min/项
+# （Java/Gradle 冷缓存发布偏慢）。
+POLL_INTERVAL="${POLL_INTERVAL:-20}"
+POLL_MAX="${POLL_MAX:-90}"
 
 command -v jq  >/dev/null || { echo "::error::jq not found"; exit 1; }
 command -v gh  >/dev/null || { echo "::error::gh not found"; exit 1; }
 command -v npm >/dev/null || { echo "::error::npm not found"; exit 1; }
 
-log() { echo "[$(date -u +%H:%M:%S)] $*"; }
+# ★日志一律写 stderr：wait_tag_commit 等函数的 stdout 是被 `$(...)` 捕获的返回值
+#   （tag commit SHA），若 log 也写 stdout，超时时的 ::error:: 会被吞进变量而非
+#   出现在 Actions 日志里（issue #85）。GitHub 从 stderr 同样识别 ::error:: 注解。
+log() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
 
 # 按目标 org 切换 gh 使用的令牌（gh 从环境读 GH_TOKEN，故只能整体切换）。
 # ★fine-grained PAT 的 resource owner 只能选一个 org——这是 GitHub 的硬约束，
@@ -254,7 +259,12 @@ run_step() {  # $1 = step JSON
   gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main \
     -f version="$version" -f artifactIds="$ids" -f trainId="$TRAIN_ID"
   log "  dispatched; waiting for tag $tag ..."
-  commit=$(wait_tag_commit "$repo" "$tag")
+  # 显式处理失败而不依赖 set -e 的隐式退出：典型原因是兄弟仓 release.yml 的
+  # create-tag 因 dispatch version != build.gradle.kts version 而失败，tag 永不出现。
+  commit=$(wait_tag_commit "$repo" "$tag") || {
+    log "::error::$repo/$workflow dispatch 后 $tag 未出现，多半是该仓 create-tag 门禁失败（dispatch version != build.gradle.kts version），请查该仓的 release run。"
+    return 1
+  }
   log "  tag $tag → commit $commit; waiting for publish run (since $since) ..."
   wait_publish_run "$repo" "$workflow" "$commit" "$since"
   log "  waiting for ALL artifacts registry visibility ..."

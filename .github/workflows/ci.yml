@@ -32,6 +32,10 @@ jobs:
           python3 scripts/release-plan/check-artifact.py \
             --plan release-plan.json --artifact platform --repo-root .
 
+      # 发布列车执行器的回归测试（issue #85）：只依赖 bash + jq，gh/npm 由测试内 shim 顶替。
+      - name: run-train.sh regression test
+        run: bash scripts/release-plan/run-train.test.sh
+
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
