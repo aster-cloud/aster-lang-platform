@@ -44,5 +44,10 @@ grep -q '::error::tag v9.9.9 在 aster-lang-core 未在超时内出现' "$TMP/st
 grep -q '::error::aster-lang-core/release.yml dispatch 后 v9.9.9 未出现' "$TMP/stderr" \
   || fail "stderr 缺少 run_step 的显式失败说明"
 grep -q '::error::' "$TMP/stdout" && fail "::error:: 不应写到 stdout（会被命令替换捕获）"
+# issue #89：GitHub 只识别行首为 :: 的 workflow command，带时间戳前缀的 ::error:: 不产生注解。
+grep -q '^::error::' "$TMP/stderr" \
+  || fail "stderr 缺少行首为 ::error:: 的注解行（前缀会让 GitHub 不识别）"
+grep -v '^::error::' "$TMP/stderr" | grep -q '::error::' \
+  && fail "存在带前缀的 ::error:: 行，GitHub 不会识别为注解：$(grep -v '^::error::' "$TMP/stderr" | grep '::error::' | head -1)"
 
-echo "PASS: run-train.sh 等 tag 超时 → rc=${rc}，::error:: 已写入 stderr"
+echo "PASS: run-train.sh 等 tag 超时 → rc=${rc}，::error:: 已写入 stderr 且位于行首"

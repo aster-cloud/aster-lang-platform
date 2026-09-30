@@ -38,14 +38,18 @@ ASTER_CLOUD_TOKEN="$GH_TOKEN"         # 保留原始（GH_TOKEN 会被 token_for
 POLL_INTERVAL="${POLL_INTERVAL:-20}"
 POLL_MAX="${POLL_MAX:-90}"
 
-command -v jq  >/dev/null || { echo "::error::jq not found"; exit 1; }
-command -v gh  >/dev/null || { echo "::error::gh not found"; exit 1; }
-command -v npm >/dev/null || { echo "::error::npm not found"; exit 1; }
-
 # ★日志一律写 stderr：wait_tag_commit 等函数的 stdout 是被 `$(...)` 捕获的返回值
 #   （tag commit SHA），若 log 也写 stdout，超时时的 ::error:: 会被吞进变量而非
-#   出现在 Actions 日志里（issue #85）。GitHub 从 stderr 同样识别 ::error:: 注解。
+#   出现在 Actions 日志里（issue #85）。
+# ★错误注解走 err 而非 log：GitHub runner 只把**行首**为 `::` 的行识别为 workflow
+#   command，log 的时间戳前缀会让 `::error::` 退化成普通日志行，Annotations 与
+#   job summary 里什么都不会出现（issue #89）。err 同样写 stderr，理由同上。
 log() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
+err() { echo "::error::$*" >&2; }
+
+command -v jq  >/dev/null || { err "jq not found"; exit 1; }
+command -v gh  >/dev/null || { err "gh not found"; exit 1; }
+command -v npm >/dev/null || { err "npm not found"; exit 1; }
 
 # 按目标 org 切换 gh 使用的令牌（gh 从环境读 GH_TOKEN，故只能整体切换）。
 # ★fine-grained PAT 的 resource owner 只能选一个 org——这是 GitHub 的硬约束，
@@ -55,7 +59,7 @@ use_token_for_org() {  # $1 = org
   case "$1" in
     wontlost-ltd)
       [ -n "$WONTLOST_TOKEN" ] || {
-        echo "::error::step 目标 org=wontlost-ltd，但未提供 WONTLOST_TOKEN（secret CROSS_REPO_TOKEN_WONTLOST，token 名 aster-cross-repo-wontlost）。fine-grained PAT 的 owner 只能选一个 org，aster-cloud 的令牌对 wontlost-ltd 仓会返回 404。"
+        err "step 目标 org=wontlost-ltd，但未提供 WONTLOST_TOKEN（secret CROSS_REPO_TOKEN_WONTLOST，token 名 aster-cross-repo-wontlost）。fine-grained PAT 的 owner 只能选一个 org，aster-cloud 的令牌对 wontlost-ltd 仓会返回 404。"
         return 1
       }
       export GH_TOKEN="$WONTLOST_TOKEN" ;;
@@ -131,7 +135,7 @@ wait_tag_commit() {  # repo, tag
     fi
     sleep "$POLL_INTERVAL"
   done
-  log "::error::tag $tag 在 $repo 未在超时内出现"; return 1
+  err "tag $tag 在 $repo 未在超时内出现"; return 1
 }
 
 # 等本次 dispatch 触发的 publish run 完成。关联条件：event=push + head_sha=tag commit
@@ -147,12 +151,12 @@ wait_publish_run() {  # repo, workflow, commit_sha, since_iso
       if [ "$status" = "completed" ]; then
         concl=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.conclusion')
         [ "$concl" = "success" ] && { log "  publish run $run success"; return 0; }
-        log "::error::publish run $run conclusion=$concl"; return 1
+        err "publish run $run conclusion=$concl"; return 1
       fi
     fi
     sleep "$POLL_INTERVAL"
   done
-  log "::error::$repo/$workflow 的 tag-push publish run 未在超时内完成"; return 1
+  err "$repo/$workflow 的 tag-push publish run 未在超时内完成"; return 1
 }
 
 # 等某 dispatch 的 workflow_dispatch run 完成（用于 service deploy）。
@@ -167,7 +171,7 @@ wait_dispatch_run() {  # repo, workflow, since_iso
       if [ "$status" = "completed" ]; then
         concl=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.conclusion')
         [ "$concl" = "success" ] && { log "  dispatch run $run success"; return 0; }
-        log "::error::dispatch run $run conclusion=$concl"; return 1
+        err "dispatch run $run conclusion=$concl"; return 1
       fi
     fi
     sleep "$POLL_INTERVAL"
@@ -184,12 +188,12 @@ wait_dispatch_run() {  # repo, workflow, since_iso
     if [ "$status" = "completed" ]; then
       concl=$(gh api "repos/$REPO_ORG/$repo/actions/runs/$run" -q '.conclusion')
       [ "$concl" = "success" ] && { log "  dispatch run $run success (末轮补查)"; return 0; }
-      log "::error::dispatch run $run conclusion=$concl"; return 1
+      err "dispatch run $run conclusion=$concl"; return 1
     fi
-    log "::error::$repo/$workflow 的 dispatch run $run 未在超时内完成（末次状态=${status}）"
+    err "$repo/$workflow 的 dispatch run $run 未在超时内完成（末次状态=${status}）"
     return 1
   fi
-  log "::error::$repo/$workflow 的 dispatch run 未在超时内完成（且未找到对应 run）"; return 1
+  err "$repo/$workflow 的 dispatch run 未在超时内完成（且未找到对应 run）"; return 1
 }
 
 run_step() {  # $1 = step JSON
@@ -221,9 +225,9 @@ run_step() {  # $1 = step JSON
     #   现在：传参失败即失败。宁可在这里红，也不要发完制品才发现集群没换版本。
     if ! gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main \
            -f trainId="$TRAIN_ID"; then
-      log "::error::dispatch $repo/$workflow 失败（带 trainId=${TRAIN_ID}）。"
-      log "::error::若报 'unexpected input', 说明该 workflow 未定义 trainId input——"
-      log "::error::它的 image-pin/部署闭环很可能只认 push 事件，列车触发不会真正生效。"
+      err "dispatch $repo/$workflow 失败（带 trainId=${TRAIN_ID}）。"
+      err "若报 'unexpected input', 说明该 workflow 未定义 trainId input——"
+      err "它的 image-pin/部署闭环很可能只认 push 事件，列车触发不会真正生效。"
       return 1
     fi
     log "  dispatched service deploy (trainId=$TRAIN_ID); waiting for deploy run ..."
@@ -244,8 +248,8 @@ run_step() {  # $1 = step JSON
   # no-op（不会再触发 publish），等 push run 会白等到超时。直接报错让人工恢复
   # （rerun 对应 tag-push publish run，或排查为何某 artifact 没发——如 locales zh/de 缺包）。
   if remote_tag_exists "$repo" "$tag"; then
-    log "::error::$repo $tag 已存在但组内 artifact 未全部可见（部分发布/发布失败）。"
-    log "::error::dispatch 对已存在 tag 是 no-op，不会重新发布。需人工恢复：rerun $repo 的 tag-push publish run，或排查缺失 artifact。"
+    err "$repo $tag 已存在但组内 artifact 未全部可见（部分发布/发布失败）。"
+    err "dispatch 对已存在 tag 是 no-op，不会重新发布。需人工恢复：rerun $repo 的 tag-push publish run，或排查缺失 artifact。"
     return 1
   fi
 
@@ -262,7 +266,7 @@ run_step() {  # $1 = step JSON
   # 显式处理失败而不依赖 set -e 的隐式退出：典型原因是兄弟仓 release.yml 的
   # create-tag 因 dispatch version != build.gradle.kts version 而失败，tag 永不出现。
   commit=$(wait_tag_commit "$repo" "$tag") || {
-    log "::error::$repo/$workflow dispatch 后 $tag 未出现，多半是该仓 create-tag 门禁失败（dispatch version != build.gradle.kts version），请查该仓的 release run。"
+    err "$repo/$workflow dispatch 后 $tag 未出现，多半是该仓 create-tag 门禁失败（dispatch version != build.gradle.kts version），请查该仓的 release run。"
     return 1
   }
   log "  tag $tag → commit $commit; waiting for publish run (since $since) ..."
@@ -275,7 +279,7 @@ run_step() {  # $1 = step JSON
     fi
     sleep "$POLL_INTERVAL"
   done
-  log "::error::$repo v$version 发布后部分 artifact registry 未在超时内可见"; return 1
+  err "$repo v$version 发布后部分 artifact registry 未在超时内可见"; return 1
 }
 
 NLAYERS=$(jq 'length' <<<"$LAYERS")
