@@ -99,6 +99,12 @@ group = "cloud.aster-lang"
 //   的是 sibling tag，故必须切新 tag 才能让副本与源同时上线。
 //   引擎/语义零改动——本版只为把文案送上生产。
 //
+// 1.0.32：引擎一致性与测试稳定性修复版。
+//   truffle：and/or 短路求值（ShortCircuitNode），与 ts 一致。ts：前缀运算符调用集合与
+//   Java operatorCall 逐项对齐；发版 workflow 补 aster-lang-test 兄弟仓；移除跨 org 升级派发。
+//   core/ts/truffle：ReDoS 与基准测试改为计数/宽缩放判定，去除 CI 噪声。test：and/or 短路与
+//   List.get 立即求值 parity 样本。
+//
 // 1.0.31：治理档案与语法糖发版（ADR 0045/0046）。
 //   core/ts：控制点注册表与 W704、`Profile "<id>".` 声明、When/Otherwise 语法糖、
 //   档案检查 E705/E706 与治理检查不可用 E707、前缀运算符调用；ts 格式化器重写为
@@ -127,7 +133,7 @@ group = "cloud.aster-lang"
 //   但**线上实际显示什么由 aster-api 的 /api/v1/messages 决定**（它优先于 npm 包），
 //   故必须同步 classpath 副本（api#292）并重新部署；副本受 lockstep parity 约束
 //   （比对 sibling tag），必须切新 tag。引擎/语义零改动。
-version = "1.0.31"
+version = "1.0.32"
 
 catalog {
     versionCatalog {
@@ -143,7 +149,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.31")
+        version("asterLang", "1.0.32")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
