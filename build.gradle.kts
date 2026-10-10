@@ -99,6 +99,13 @@ group = "cloud.aster-lang"
 //   的是 sibling tag，故必须切新 tag 才能让副本与源同时上线。
 //   引擎/语义零改动——本版只为把文案送上生产。
 //
+// 1.0.31：治理档案与语法糖发版（ADR 0045/0046）。
+//   core/ts：控制点注册表与 W704、`Profile "<id>".` 声明、When/Otherwise 语法糖、
+//   档案检查 E705/E706 与治理检查不可用 E707、前缀运算符调用；ts 格式化器重写为
+//   AST 打印器、LSP 无损重排不再改写字符串字面量。locales/hi：注册表 1.1.0（含档案）
+//   与六个治理语法糖词。test：语法糖/长写法成对样本与前缀运算符样本。
+//   新 SemanticTokenKind 在本版发布前一直位于 OPTIONAL_KINDS（ADR 0029 先例）。
+//
 // 1.0.30：发布链路验证版（**引擎源码相对 1.0.29 零变更**）。
 //   本版不含任何语义/引擎改动——九个生态仓相对 v1.0.29 逐字节相同。
 //   目的是用一轮真实列车验证 platform#82 / aster-api#338 的修复：
@@ -120,7 +127,7 @@ group = "cloud.aster-lang"
 //   但**线上实际显示什么由 aster-api 的 /api/v1/messages 决定**（它优先于 npm 包），
 //   故必须同步 classpath 副本（api#292）并重新部署；副本受 lockstep parity 约束
 //   （比对 sibling tag），必须切新 tag。引擎/语义零改动。
-version = "1.0.30"
+version = "1.0.31"
 
 catalog {
     versionCatalog {
@@ -136,7 +143,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.30")
+        version("asterLang", "1.0.31")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
