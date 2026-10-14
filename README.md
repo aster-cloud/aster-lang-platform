@@ -39,7 +39,7 @@ dependencyResolutionManagement {
     repositories { mavenLocal(); mavenCentral() /* + GitHub Packages */ }
     versionCatalogs {
         create("asterLibs") {
-            from("cloud.aster-lang:aster-lang-platform:1.0.32")
+            from("cloud.aster-lang:aster-lang-platform:1.0.33")
         }
     }
 }
@@ -73,7 +73,7 @@ dependencies {
 
 | 键 | 值 | 说明 |
 |---|---|---|
-| `asterLang` | `1.0.32` | 全部一方 JVM 模块共用一个号，每次发版 lockstep 重新打 tag |
+| `asterLang` | `1.0.33` | 全部一方 JVM 模块共用一个号，每次发版 lockstep 重新打 tag |
 | `graalvm` | `25.0.4` | GraalVM/Truffle 全部组件必须同版，混用会 `NoClassDefFoundError` |
 | `junit` | `6.0.0` | |
 | `quarkus` | `3.37.0` | quarkus-bom |
