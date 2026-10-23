@@ -125,7 +125,7 @@
       "kind": "npm",
       "versionSource": "literal",
       "expectedVersion": "1.0.24",
-      "expectedPlatformPin": "1.0.33",
+      "expectedPlatformPin": "1.0.34",
       "artifactPath": "ui-messages",
       "releaseWorkflow": "release.yml",
       "npmName": "@aster-cloud/ui-messages",
@@ -149,7 +149,7 @@
       "kind": "npm",
       "versionSource": "literal",
       "expectedVersion": "1.0.24",
-      "expectedPlatformPin": "1.0.33",
+      "expectedPlatformPin": "1.0.34",
       "artifactPath": "ui-messages",
       "releaseWorkflow": "release.yml",
       "npmName": "@aster-cloud/ui-messages-hi",
@@ -185,7 +185,7 @@
       "kind": "service",
       "versionSource": "none",
       "expectedVersion": null,
-      "expectedPlatformPin": "1.0.33",
+      "expectedPlatformPin": "1.0.34",
       "releaseWorkflow": "deploy.yml"
     }
   ],
