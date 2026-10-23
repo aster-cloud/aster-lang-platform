@@ -138,7 +138,12 @@ group = "cloud.aster-lang"
 //   但**线上实际显示什么由 aster-api 的 /api/v1/messages 决定**（它优先于 npm 包），
 //   故必须同步 classpath 副本（api#292）并重新部署；副本受 lockstep parity 约束
 //   （比对 sibling tag），必须切新 tag。引擎/语义零改动。
-version = "1.0.33"
+// 1.0.34：服务端类型检查接入前置（2026-10-23 生产 E2E）。core：Java 检查器与 TS 对齐
+// （裸枚举变体、推断返回类型进签名、字段路径 E101/E011、命名空间调用目标）；core 与 ts 同步把
+// 未标类型的 context/metadata 推断为 Map<Text, Unknown> 并允许字段路径穿过 Map（IR 协议同步，
+// ts npm 1.0.36）；test 新增 context 点访问 parity 样本。aster-api 据此在全部编译路径强制类型检查。
+//
+version = "1.0.34"
 
 catalog {
     versionCatalog {
@@ -154,7 +159,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.33")
+        version("asterLang", "1.0.34")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
