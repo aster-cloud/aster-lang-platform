@@ -143,7 +143,15 @@ group = "cloud.aster-lang"
 // 未标类型的 context/metadata 推断为 Map<Text, Unknown> 并允许字段路径穿过 Map（IR 协议同步，
 // ts npm 1.0.36）；test 新增 context 点访问 parity 样本。aster-api 据此在全部编译路径强制类型检查。
 //
-version = "1.0.34"
+// 1.0.35：2026-10-25 aster-lang 问题清扫。core：DualEngineCrossLangTest 支持 expectError（#192）、
+// Decimal 展开位数按真实长度计算（#185，与 aster-cloud canonical-json 同步）、Java 侧语义桥主链路
+// 与 verifier 判定门禁（#213）；truffle：死锁判定以任务终态为准（#131）、已知规模 builtin 物化前
+// 准入扣分配预算（#126，与 ts 同步）；locales：lexicon parity 门禁在 CI fail-closed（#94）、zh
+// 括号函数头变换器消除二次回溯（128KB 源码原约 54 秒）；test：soc2 样本通过 Java 类型检查、
+// bridge-cases 新增两例（npm 1.0.4）；ts npm 1.0.37：E104 块作用域与 lambda 作用域对齐、变换器
+// 字符串掩码、zh 括号函数头、分配预算准入、语义桥候选区间改为原文坐标。
+//
+version = "1.0.35"
 
 catalog {
     versionCatalog {
@@ -159,7 +167,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.34")
+        version("asterLang", "1.0.35")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
