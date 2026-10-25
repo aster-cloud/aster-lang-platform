@@ -148,7 +148,7 @@ group = "cloud.aster-lang"
 // 与 verifier 判定门禁（#213）；truffle：死锁判定以任务终态为准（#131）、已知规模 builtin 物化前
 // 准入扣分配预算（#126，与 ts 同步）；locales：lexicon parity 门禁在 CI fail-closed（#94）、zh
 // 括号函数头变换器消除二次回溯（128KB 源码原约 54 秒）；test：soc2 样本通过 Java 类型检查、
-// bridge-cases 新增两例（npm 1.0.4）；ts npm 1.0.37：E104 块作用域与 lambda 作用域对齐、变换器
+// bridge-cases 新增两例（npm 包与生态共用 v* tag，本轮不发，见 aster-lang-test#168）；ts npm 1.0.37：E104 块作用域与 lambda 作用域对齐、变换器
 // 字符串掩码、zh 括号函数头、分配预算准入、语义桥候选区间改为原文坐标。
 //
 version = "1.0.35"
