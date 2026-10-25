@@ -4,7 +4,7 @@
 #
 # 做法：用假 gh 模拟「dispatch 成功但 tag 永不出现」（gh workflow run 成功，
 # gh api 一律失败），把轮询压到 1 次 × 0s，断言脚本非零退出且 stderr 含超时注解。
-# 只依赖 bash + jq；gh/npm 由本测试的 shim 顶替。
+# 只依赖 bash + jq + python3；gh/npm 由本测试的 shim 顶替。
 #
 # 用法：bash scripts/release-plan/run-train.test.sh
 set -euo pipefail
@@ -51,3 +51,27 @@ grep -v '^::error::' "$TMP/stderr" | grep -q '::error::' \
   && fail "存在带前缀的 ::error:: 行，GitHub 不会识别为注解：$(grep -v '^::error::' "$TMP/stderr" | grep '::error::' | head -1)"
 
 echo "PASS: run-train.sh 等 tag 超时 → rc=${rc}，::error:: 已写入 stderr 且位于行首"
+
+# ── aster-lang-test#168：tag 前缀推导 ───────────────────────────────────────
+# 独立号 npm 制品（test:npm）用专属前缀 npm-v，不得与生态号 v* 撞 tag。
+# ①coalesce.py 须把 release-plan 的 tagPrefix 带进 step（缺省 v）；
+# ②run-train.sh 须用 tagPrefix+version 推导要等的 tag。
+PLAN="$HERE/../../release-plan.json"
+STEPS="$(python3 "$HERE/coalesce.py" --plan "$PLAN" | jq -c '[.[][]]')"
+prefix_of() { jq -r --arg id "$1" '.[] | select(.artifactIds | index($id)) | .tagPrefix' <<<"$STEPS"; }
+[ "$(prefix_of test:npm)" = "npm-v" ] || fail "coalesce: test:npm 的 tagPrefix 应为 npm-v，实际 $(prefix_of test:npm)"
+[ "$(prefix_of test:jvm)" = "v" ]     || fail "coalesce: test:jvm 的 tagPrefix 应为缺省 v，实际 $(prefix_of test:jvm)"
+
+LAYERS='[[{"repo":"aster-lang-test","org":"aster-cloud","workflow":"release-npm.yml","version":"9.9.9","tagPrefix":"npm-v","artifactIds":["test:npm"],"kinds":["npm"],"artifacts":[{"id":"test:npm","kind":"npm","version":"9.9.9","npmName":"@aster-cloud/aster-lang-test","npmRegistry":"npmjs"}]}]]'
+set +e
+PATH="$TMP/bin:$PATH" GH_TOKEN=dummy TRAIN_ID=test DRY_RUN=false \
+  POLL_INTERVAL=0 POLL_MAX=1 LAYERS="$LAYERS" \
+  bash "$SCRIPT" >"$TMP/stdout" 2>"$TMP/stderr"
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "npm-v 前缀：等 tag 超时应非零退出，实际 rc=0"
+grep -q '::error::tag npm-v9.9.9 在 aster-lang-test 未在超时内出现' "$TMP/stderr" \
+  || fail "npm-v 前缀：run-train.sh 应等待 tag npm-v9.9.9"
+grep -q 'tag v9.9.9' "$TMP/stderr" && fail "npm-v 前缀：不应再等待生态号 tag v9.9.9"
+
+echo "PASS: tag 前缀推导 → test:npm=npm-v、test:jvm=v；run-train.sh 等待 npm-v9.9.9"

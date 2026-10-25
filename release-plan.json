@@ -30,6 +30,7 @@
       "aster-api:service"
     ]
   ],
+  "$tagPrefixComment": "tagPrefix=该 artifact 的 release tag 前缀（缺省 \"v\"，即 v<expectedVersion>）。同仓多 workflow 且版本号独立的制品必须用专属前缀，否则会与生态号 v* 撞 tag、版本无法前进：test:npm 用 npm-v（aster-lang-test#168），其 release-npm.yml 只监听 npm-v*。coalesce 取组内主 artifact 的 tagPrefix，run-train.sh 据此推导 tag。",
   "$versionSourceComment": "versionSource 决定 gate 断言方式：literal=源文件硬编码 version=\"X\"（需手工 bump + tag==version gate）；catalog-derived=version=asterLibs.findVersion(\"asterLang\")（派生自该仓 pin 的 platform catalog——gate 须同时断言①确实派生而非字面量 ②expectedPlatformPin==platformVersion，否则 pin 到旧 platform 会稳定派生错误版本）；none=无版本制品。",
   "artifacts": [
     {
@@ -102,6 +103,7 @@
       "expectedPlatformPin": null,
       "artifactPath": "packages/js",
       "releaseWorkflow": "release-npm.yml",
+      "tagPrefix": "npm-v",
       "npmName": "@aster-cloud/aster-lang-test",
       "npmRegistry": "npmjs"
     },

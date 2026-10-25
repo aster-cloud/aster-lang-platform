@@ -197,7 +197,7 @@ wait_dispatch_run() {  # repo, workflow, since_iso
 }
 
 run_step() {  # $1 = step JSON
-  local step="$1" repo workflow version ids kinds since tag commit
+  local step="$1" repo workflow version prefix ids kinds since tag commit
   repo=$(jq -r '.repo' <<<"$step")
   # ★按 step 覆写仓库 org（coalesce.py 从 release-plan 的 artifact.org 带出，缺省 aster-cloud）
   #   并同步切换 GH_TOKEN——fine-grained PAT 的 resource owner 只能选一个 org，
@@ -206,9 +206,12 @@ run_step() {  # $1 = step JSON
   use_token_for_org "$REPO_ORG"
   workflow=$(jq -r '.workflow' <<<"$step")
   version=$(jq -r '.version // empty' <<<"$step")
+  # tag 前缀由 coalesce.py 从 release-plan 的 artifact.tagPrefix 带出（缺省 v）；
+  # 独立号 npm 制品用专属前缀（test:npm=npm-v），避免与生态号 v* 撞 tag（aster-lang-test#168）。
+  prefix=$(jq -r '.tagPrefix // "v"' <<<"$step")
   ids=$(jq -r '.artifactIds | join(",")' <<<"$step")
   kinds=$(jq -r '.kinds | join(",")' <<<"$step")
-  log "STEP $repo/$workflow v${version:-<none>} ids=[$ids]"
+  log "STEP $repo/$workflow ${version:+$prefix}${version:-<none>} ids=[$ids]"
 
   # service（aster-api/deploy.yml）：无 version/tag → dispatch 并**等 deploy run 成功**。
   if [ "$kinds" = "service" ] || [ -z "$version" ]; then
@@ -238,11 +241,11 @@ run_step() {  # $1 = step JSON
 
   # 幂等：组内全 artifact 已可见 → skip（resume 安全；dual-artifact 要求全可见）
   if all_artifacts_visible "$step"; then
-    log "  all artifacts v$version already visible → skip (resume/idempotent)"
+    log "  all artifacts $prefix$version already visible → skip (resume/idempotent)"
     return 0
   fi
 
-  tag="v$version"
+  tag="$prefix$version"
 
   # fail-fast：tag 已存在但 artifact 不全。各仓 create-tag 对已存在同 commit tag 是
   # no-op（不会再触发 publish），等 push run 会白等到超时。直接报错让人工恢复
@@ -275,11 +278,11 @@ run_step() {  # $1 = step JSON
   local i
   for ((i=0;i<POLL_MAX;i++)); do
     if all_artifacts_visible "$step"; then
-      log "  $repo v$version all artifacts visible ✅"; return 0
+      log "  $repo $tag all artifacts visible ✅"; return 0
     fi
     sleep "$POLL_INTERVAL"
   done
-  err "$repo v$version 发布后部分 artifact registry 未在超时内可见"; return 1
+  err "$repo $tag 发布后部分 artifact registry 未在超时内可见"; return 1
 }
 
 NLAYERS=$(jq 'length' <<<"$LAYERS")

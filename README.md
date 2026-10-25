@@ -141,6 +141,9 @@ CI 的 drift gate（`.github/workflows/ci.yml`）断言 `build.gradle.kts` 的 `
    platform → {core, runtime, validation, test} → {locales, hi} → truffle → {ts, aster-api}；
    每步 dispatch 目标仓 `release.yml` 建 tag → 等 tag-push publish run → 等制品在
    registry 可见。forward-only，失败即停，可用 `fromLayer` 续跑。
+   tag 为 `<tagPrefix><expectedVersion>`，`tagPrefix` 缺省 `v`；独立号的 test:npm 用
+   `npm-v`（如 `npm-v1.0.4`，aster-lang-test 的 `release-npm.yml` 只监听 `npm-v*`），
+   避免与生态号 `v*` 撞 tag（aster-lang-test#168）。
 
 只改本仓（不发生态）时——例如 wrapper 升级、治理文件——**不要**动 `asterLang`，
 但 platform 自身 `version` 与 `release-plan.json.platformVersion` 仍须一起动。

@@ -17,6 +17,9 @@ version 取该 (repo,workflow) 组里**主 artifact** 的版本：
   - 否则（纯 npm 组，如 ts:npm / test:npm）→ 用该 npm artifact 的 expectedVersion
 dual-artifact 同 workflow（locales/hi）→ 主版本是 Maven 的，npm 版本由各仓 publish 内部 gate 自校。
 
+tagPrefix 同样取主 artifact 的（缺省 "v"），run-train.sh 用 tagPrefix+version 推导 tag：
+独立号 npm 制品（如 test:npm=npm-v）不能与生态号共用 v*，否则撞 tag（aster-lang-test#168）。
+
 用法： coalesce.py --plan release-plan.json   → stdout JSON
 """
 import argparse
@@ -26,6 +29,8 @@ from pathlib import Path
 
 # 主版本优先级：tag 代表的 release line。Maven/catalog > service > npm。
 KIND_PRIORITY = {"catalog": 0, "maven": 1, "service": 2, "npm": 3}
+# release tag 缺省前缀：生态号制品统一 v<version>。
+DEFAULT_TAG_PREFIX = "v"
 
 
 def main() -> int:
@@ -54,6 +59,7 @@ def main() -> int:
                 "org": primary.get("org", "aster-cloud"),
                 "workflow": workflow,
                 "version": primary["expectedVersion"],
+                "tagPrefix": primary.get("tagPrefix", DEFAULT_TAG_PREFIX),
                 "artifactIds": [a["id"] for a in arts],
                 "kinds": [a["kind"] for a in arts],
                 # 组内每个 artifact 的完整可见性判定信息——orchestrator 必须确认
