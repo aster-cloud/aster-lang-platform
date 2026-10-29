@@ -151,7 +151,20 @@ group = "cloud.aster-lang"
 // bridge-cases 新增两例（npm 包与生态共用 v* tag，本轮不发，见 aster-lang-test#168）；ts npm 1.0.37：E104 块作用域与 lambda 作用域对齐、变换器
 // 字符串掩码、zh 括号函数头、分配预算准入、语义桥候选区间改为原文坐标。
 //
-version = "1.0.35"
+// 1.0.36：领域词汇按位置解析（ADR 0051）。不做向后兼容：解析前全局文本替换被删除，改为
+//   解析后两阶段名称解析（R1 声明位置 / R2 引用位置），E800–E807/W800–W801 诊断，toolchainId 改为
+//   abi=1.1;…;resolver=1;casefold=15.1，source envelope 增加第 5 段（canonicalScopesJson）。
+//   locales：Unicode 15.1 简单大小写折叠表（casefold/）与测试向量；内置词汇无父枚举值补齐父枚举
+//   （CreditLevel/LoanType/QuoteStatus/RiskLevel）；E8xx 中文诊断文案。core：Java 同构实现
+//   （VocabularyScopes、NameResolution、限定枚举成员 E.M 类型检查、EnvelopeVectorsTest）。
+//   truffle：Loader 求值 E.M 枚举成员，CnlCompiler 改走 core NameResolution（E8xx 闸门）。
+//   test：语料自带词汇格式、tier1 vocab-de/zh/hi parity 样本、envelope 向量；npm 1.1.0
+//   （normalizeIr 改为选项对象并新增 includeResolution，签名不兼容，取次版本位）。
+//   ts npm 1.1.0：R1/R2、buildVocabularyScopes/resolvePolicyTypes、LSP 按角色悬停与补全；包入口不再导出
+//   lowerModule 与未检查的 resolveAndLower（只保留带检查的出口），属 API 不兼容，取次版本位。
+//   runtime/validation/hi 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.36"
 
 catalog {
     versionCatalog {
@@ -167,7 +180,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.35")
+        version("asterLang", "1.0.36")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
