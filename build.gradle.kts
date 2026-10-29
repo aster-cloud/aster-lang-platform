@@ -160,7 +160,8 @@ group = "cloud.aster-lang"
 //   truffle：Loader 求值 E.M 枚举成员，CnlCompiler 改走 core NameResolution（E8xx 闸门）。
 //   test：语料自带词汇格式、tier1 vocab-de/zh/hi parity 样本、envelope 向量；npm 1.1.0
 //   （normalizeIr 改为选项对象并新增 includeResolution，签名不兼容，取次版本位）。
-//   ts npm 1.0.38：R1/R2、buildVocabularyScopes/resolvePolicyTypes、LSP 按角色悬停与补全。
+//   ts npm 1.1.0：R1/R2、buildVocabularyScopes/resolvePolicyTypes、LSP 按角色悬停与补全；包入口不再导出
+//   lowerModule 与未检查的 resolveAndLower（只保留带检查的出口），属 API 不兼容，取次版本位。
 //   runtime/validation/hi 源码无变更，lockstep 重新打 tag。
 //
 version = "1.0.36"
