@@ -164,7 +164,19 @@ group = "cloud.aster-lang"
 //   lowerModule 与未检查的 resolveAndLower（只保留带检查的出口），属 API 不兼容，取次版本位。
 //   runtime/validation/hi 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.36"
+// 1.0.37：ADR 0051 跟进修复。core：workflow 多元素（第二个 step、compensate、retry、timeout）与 match
+//   缩进块分支的 Java 语法与 TS 对齐（#218）；Core IR 中 workflow 未设置的 retry/timeout/compensate
+//   省略而非输出 null（#219，与 TS 一致）；天城文可作类型名与枚举值（#220，裁决 R53）；重复/歧义的
+//   枚举变体、Data 字段与构造字段诊断报在条目位置。locales：zh 诊断译文补齐 95 条、de 新增 95 条，
+//   overlay 移到 overlays/<语言 id>/，修复多个语言包同处 classpath 时同名 overlay 互相遮蔽（#107/#108）。
+//   hi：hi-IN 诊断 overlay 注册与 95 条译文。truffle：反序列化 Block 分支体、Scope 局部遮蔽（#149）。
+//   test：签名与字段类型的 written/role 纳入 parity 比较，新增 workflow/函数类型/天城文 tier1 样本；
+//   npm 1.2.0（normalizeIr 在 includeResolution 下比较更严格，取次版本位）。ts npm 1.2.0：函数类型
+//   语法 (T1, T2) -> R（#247）、格式化器保留 Type X as T（#246）、诊断随语言包 overlay 本地化
+//   （locales#107）、LSP 修复（#248）；只在函数体出现的显式 of T 保留到 typeParams（Core IR 变化，
+//   裁决 R54：不递增 RESOLVER_VERSION）。runtime/validation 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.37"
 
 catalog {
     versionCatalog {
@@ -180,7 +192,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.36")
+        version("asterLang", "1.0.37")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
