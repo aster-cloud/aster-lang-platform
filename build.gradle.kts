@@ -176,7 +176,16 @@ group = "cloud.aster-lang"
 //   （locales#107）、LSP 修复（#248）；只在函数体出现的显式 of T 保留到 typeParams（Core IR 变化，
 //   裁决 R54：不递增 RESOLVER_VERSION）。runtime/validation 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.37"
+// 1.0.38：Set 语句与块作用域写回（ADR 0052）。core：`Set x to …` 解析为对已有 Let 绑定的赋值，不再
+//   改写成 Let 声明；首次声明用 Set 报 E101，Set 形参、模式绑定与 lambda 捕获变量报 E001（#225）；
+//   词法器合成的 token 带来源，缺句末标点紧接文件末尾时不再 NPE（#226）；CoreIrFingerprintCli 输出
+//   诊断位置（#224）。locales：zh/de/en 词法表不再把 Set 改写成 Let（#112）；德语快照回滚按钮文案
+//   修正（#111，ui-messages npm 1.0.25）。truffle：成员缺失抛结构化 MissingMemberException（#154）；
+//   延迟重试 poller 不再读写 workflow 确定性时钟，轮询出错时退避（#155）。test：Set 块作用域写回与
+//   规则作函数值 tier1 样本，带词汇样本比较两引擎诊断起始行（#179–#181）；npm 包无变更，保持 1.2.0。
+//   ts npm 1.2.3（已含 Set 写回）先行发布，本次不变。runtime/validation/hi 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.38"
 
 catalog {
     versionCatalog {
@@ -192,7 +201,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.37")
+        version("asterLang", "1.0.38")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
