@@ -40,6 +40,12 @@ done
 if [ "$method" = "DELETE" ]; then echo "DELETE $ep" >>"$DELETES"; exit 0; fi
 key="$FIX/$(echo "$ep" | tr '/' '_').json"
 [ -e "$FIX/.dispatched" ] && [ -e "$key.after" ] && key="$key.after"
+# 按读取次数切换的 fixture：<key>.seq.1、.seq.2 …（第 n 次读取用 .seq.n，超出则用最大的那个）。
+if [ -e "$key.seq.1" ]; then
+  n=$(( $(cat "$key.count" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$key.count"
+  while [ "$n" -gt 1 ] && [ ! -e "$key.seq.$n" ]; do n=$((n-1)); done
+  key="$key.seq.$n"
+fi
 [ -e "$key" ] || exit 1
 if [ -n "$q" ]; then jq -r "$q" "$key"; else cat "$key"; fi
 EOF
@@ -135,6 +141,29 @@ jq -e '.steps[] | select(.repo=="aster-api" and .run==1 and .result=="deployed")
 unset TRAIN_MANIFEST
 echo "PASS: service deploy 按 trainId 关联正确的 run（忽略更新的无关 run）"
 
+# ── 4b. 列车 dispatch 后的延迟窗口里插入一个手工 dispatch：不得锁定它（review M2）─────
+#   第 1 轮只看到手工 run M（无列车标题、一直 in_progress）；第 2 轮起本列车的 run T 出现。
+#   正确行为：每轮按标题重查，回退「since 后最早」只在连续 N 轮无匹配后启用，故等到 T 成功。
+newcase interleave
+EP=repos/wontlost-ltd/aster-api/actions/workflows/deploy.yml/runs
+fx $EP '{"workflow_runs":[{"id":9,"display_title":"Deploy","status":"in_progress","created_at":"2026-01-01T00:00:30Z"}]}' .seq.1
+fx $EP '{"workflow_runs":[{"id":9,"display_title":"Deploy","status":"in_progress","created_at":"2026-01-01T00:00:30Z"},
+  {"id":1,"display_title":"Deploy · train T1","status":"in_progress","created_at":"2026-01-01T00:00:40Z"}]}' .seq.2
+fx repos/wontlost-ltd/aster-api/actions/runs/1 '{"id":1,"status":"completed","conclusion":"success"}'
+fx repos/wontlost-ltd/aster-api/actions/runs/9 '{"id":9,"status":"in_progress","conclusion":null}'
+DRY_RUN=false POLL_MAX=1 SERVICE_POLL_MAX=4 SERVICE_FALLBACK_AFTER=3 WONTLOST_TOKEN=w LAYERS="[[$API_STEP]]" run_train
+[ "$rc" -eq 0 ] || fail "interleave：应等到本列车的 run 1，而非锁定手工 run 9，rc=$rc"
+grep -q 'deploy run 1 success' "$TMP/stderr" || fail "interleave：应报告 run 1 成功"
+grep -q 'run 9' "$TMP/stderr" && fail "interleave：不应关联到手工 run 9"
+# 老 deploy.yml（永远无标题）：连续 N 轮无匹配后回退到 since 后最早的 run。
+newcase fallback
+fx $EP '{"workflow_runs":[{"id":5,"display_title":"Deploy","status":"completed","conclusion":"success","created_at":"2026-01-01T00:00:30Z"}]}'
+fx repos/wontlost-ltd/aster-api/actions/runs/5 '{"id":5,"status":"completed","conclusion":"success"}'
+DRY_RUN=false POLL_MAX=1 SERVICE_POLL_MAX=4 SERVICE_FALLBACK_AFTER=2 WONTLOST_TOKEN=w LAYERS="[[$API_STEP]]" run_train
+[ "$rc" -eq 0 ] || fail "fallback：无标题时 N 轮后应回退到最早的 run 5，rc=$rc"
+grep -q '回退' "$TMP/stderr" || fail "fallback：回退应在日志中可见"
+echo "PASS: 延迟窗口内的手工 dispatch 不被锁定；老 deploy.yml 在 N 轮无匹配后可见地回退"
+
 # ── 5. cleanup-train.sh：dry-run 只列不删；实删覆盖 tag 缓存 / 列车 deploy 制品 / 列车自身制品 ──
 newcase cleanup
 fx repos/aster-cloud/aster-lang-core/actions/caches '{"actions_caches":[{"id":11,"key":"setup-java-Linux-gradle-x","ref":"refs/tags/v9.9.9"}]}'
@@ -175,4 +204,11 @@ set -e
 [ "$rc" -eq 0 ] || fail "cleanup(keep-resume)：rc=$rc"
 grep -q 'artifacts/21' "$DELETES" && fail "cleanup(keep-resume)：列车失败时不得删 deploy 中间制品"
 grep -qx 'DELETE repos/aster-cloud/aster-lang-core/actions/caches/11' "$DELETES" || fail "cleanup(keep-resume)：tag 缓存仍应删除"
+# LAYERS 解析失败（review L9）：只告警，退出 0——清理绝不能把列车变红。
+set +e
+PATH="$TMP/bin:$PATH" GH_TOKEN=dummy TRAIN_ID=T1 DRY_RUN=false LAYERS='not json' bash "$CLEAN" >"$TMP/stdout" 2>"$TMP/stderr"
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "cleanup(bad LAYERS)：应只告警退出 0，rc=$rc"
+grep -q '^::warning::' "$TMP/stderr" || fail "cleanup(bad LAYERS)：应输出 ::warning::"
 echo "PASS: cleanup-train.sh —— dry-run 只列；实删 tag 缓存 + 本列车 deploy 制品 + 列车自身制品，不误删"

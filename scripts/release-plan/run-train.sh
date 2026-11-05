@@ -41,6 +41,9 @@ POLL_MAX="${POLL_MAX:-90}"
 #   实测 26–32min（1.0.38 / 1.0.39），与 Java 发布共用的 30min 上限几乎贴边——1.0.39 的
 #   deploy 32 分钟成功，列车却在第 30 分钟报超时。缺省 180 × 20s = 60min，仍是有界等待。
 SERVICE_POLL_MAX="${SERVICE_POLL_MAX:-180}"
+# 连续多少轮找不到带列车标题的 run 后，才回退到「since 后最早的 dispatch run」（老 deploy.yml 兼容）。
+# 缺省 15 × 20s = 5min：run 出现在列表里通常只要几秒，5 分钟仍找不到标题即可判定 deploy.yml 没有 run-name。
+SERVICE_FALLBACK_AFTER="${SERVICE_FALLBACK_AFTER:-15}"
 # stale gate（ADR 0053 §7）：preflight 记录的各仓 main SHA（JSON 对象 repo→sha）。
 # dispatch 前若该仓 main 已前进 → 停车，防「drift gate 验的是 A，发出去的是 B」（1.0.37）。
 # 缺省 {} = 不设防（向后兼容：老的 workflow 不传它时行为不变）。
@@ -223,17 +226,19 @@ wait_publish_run() {  # repo, workflow, commit_sha, since_iso
 }
 
 # 找本列车 dispatch 的 deploy run（ADR 0053 §6）。
-# ★信号要对：旧实现取「created>=since 的**最新**一个 dispatch run」，任何人在此期间手工
-#   dispatch 一次 deploy 就会关联错。现在优先按 run-name 关联——deploy.yml 在 trainId 非空时
-#   把 run 标题设为「Deploy · train <id>」；老版本 deploy.yml 无 run-name 时回退为
-#   created>=since 的**最早**一个 dispatch run（列车 dispatch 之后最先出现的那个）。
-find_service_run() {  # repo, workflow, since
-  local repo="$1" workflow="$2" since="$3"
-  gh api --method GET "repos/$REPO_ORG/$repo/actions/workflows/$workflow/runs" \
-    -f event=workflow_dispatch -f created=">=$since" -f per_page=100 \
-    -q "[.workflow_runs[] | select((.display_title // \"\") | endswith(\"train $TRAIN_ID\"))] as \$t
-        | if (\$t|length)>0 then (\$t | sort_by(.created_at) | last | .id)
-          else (.workflow_runs | sort_by(.created_at) | first | .id // empty) end" 2>/dev/null || true
+#   $4=titled   只认标题以「train <id>」结尾的 run（deploy.yml 的 run-name）
+#   $4=earliest 回退：created>=since 的**最早**一个 dispatch run（老 deploy.yml 无 run-name 时）
+# ★不锁定（review M2）：wait_dispatch_run 每轮都重新按标题查；回退只在**连续**
+#   SERVICE_FALLBACK_AFTER 轮无标题匹配后才启用，避免把延迟窗口里插进来的手工 dispatch 当成本列车的。
+find_service_run() {  # repo, workflow, since, mode
+  local filter
+  if [ "$4" = titled ]; then
+    filter="[.workflow_runs[] | select((.display_title // \"\") | endswith(\"train $TRAIN_ID\"))] | sort_by(.created_at) | last | .id // empty"
+  else
+    filter=".workflow_runs | sort_by(.created_at) | first | .id // empty"
+  fi
+  gh api --method GET "repos/$REPO_ORG/$1/actions/workflows/$2/runs" \
+    -f event=workflow_dispatch -f created=">=$3" -f per_page=100 -q "$filter" 2>/dev/null || true
 }
 
 # 查 run 终态：0=success，1=失败，2=未完成。
@@ -248,11 +253,21 @@ run_terminal() {  # repo, run
 
 # 等本列车 dispatch 的 deploy run 完成（service step）。上限 SERVICE_POLL_MAX，有界。
 wait_dispatch_run() {  # repo, workflow, since_iso
-  local repo="$1" workflow="$2" since="$3" i run="" rc
+  local repo="$1" workflow="$2" since="$3" i run="" rc misses=0 warned=""
   RUN_STATUS=""
   # ★<= 而非 <：最后一轮之后**再查一次终态**（issue #82，1.0.29 差 18 秒误判超时）。
   for ((i=0;i<=SERVICE_POLL_MAX;i++)); do
-    [ -n "$run" ] || run=$(find_service_run "$repo" "$workflow" "$since")
+    run=$(find_service_run "$repo" "$workflow" "$since" titled)
+    if [ -z "$run" ]; then
+      misses=$((misses+1))
+      if [ "$misses" -ge "$SERVICE_FALLBACK_AFTER" ]; then
+        run=$(find_service_run "$repo" "$workflow" "$since" earliest)
+        if [ -n "$run" ] && [ -z "$warned" ]; then
+          log "  连续 $misses 轮无标题含 train $TRAIN_ID 的 run（deploy.yml 缺 run-name？）→ 回退关联 since 后最早的 run $run"
+          warned=1
+        fi
+      fi
+    fi
     if [ -n "$run" ] && [ "$run" != "null" ]; then
       rc=0; run_terminal "$repo" "$run" || rc=$?
       case "$rc" in

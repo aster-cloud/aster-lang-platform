@@ -40,6 +40,12 @@ jobs:
       - name: train artifact-reuse regression test
         run: bash scripts/release-plan/train-reuse.test.sh
 
+      # workflow 静态检查（review L12），钉死版本。
+      - name: actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 "$RUNNER_TEMP"
+          "$RUNNER_TEMP/actionlint" -color
+
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
