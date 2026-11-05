@@ -27,8 +27,10 @@ on:
 permissions:
   contents: read
 
+# 独立 concurrency 组（review L10）：手工清理不应排在一趟正在跑的列车后面等它跑完，
+# 也不应占住 release-train 组挡住下一趟列车。同一时刻只跑一个手工清理。
 concurrency:
-  group: release-train
+  group: release-train-cleanup
   cancel-in-progress: false
 
 jobs:
