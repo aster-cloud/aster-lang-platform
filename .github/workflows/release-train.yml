@@ -34,6 +34,10 @@ on:
         description: 'release train 标识（审计；默认 run id）'
         type: string
         required: false
+      cleanup:
+        description: '列车结束后（成功或失败）清理本列车的临时制品与 tag-ref 缓存（ADR 0053 §9）'
+        type: boolean
+        default: true
 
 concurrency:
   group: release-train
@@ -64,6 +68,9 @@ jobs:
   preflight:
     needs: plan
     runs-on: ubuntu-latest
+    # stale gate（ADR 0053 §7）：drift gate 验过的各仓 main SHA，交给 train 在每次 dispatch 前比对。
+    outputs:
+      main_shas: ${{ steps.drift.outputs.main_shas }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -71,6 +78,7 @@ jobs:
       # 全仓 drift gate：checkout 每个仓的 main，跑 check-artifact.py。任一漂移即停，
       # 不进发布。这是发布前最后一道防线（防 main 已漂移 / Renovate pin PR 未合）。
       - name: Drift gate across all artifacts
+        id: drift
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
           # ★owner=wontlost-ltd 的 fine-grained PAT（token 名 aster-cross-repo-wontlost）。
@@ -117,12 +125,17 @@ jobs:
                 continue
               fi
               CLONED[$REPO]=1
+              echo "$REPO $(git -C "/tmp/$REPO" rev-parse HEAD)" >> /tmp/main-shas.txt
             fi
             if ! python3 scripts/release-plan/check-artifact.py --plan "$PLAN" --artifact "$ID" --repo-root "/tmp/$REPO"; then
               fail=1
             fi
           done
           [ "$fail" = "0" ] || { echo "::error::preflight drift gate failed — 有 artifact 不符 release-plan，终止发布"; exit 1; }
+          # 验过的 main SHA → JSON（repo→sha），train 每次 dispatch 前据此拦截列车途中的合入。
+          MAIN_SHAS=$(python3 -c "import json;print(json.dumps(dict(l.split() for l in open('/tmp/main-shas.txt'))))")
+          echo "main_shas=$MAIN_SHAS" >> "$GITHUB_OUTPUT"
+          echo "preflight 验过的 main SHA：$MAIN_SHAS"
           echo "preflight drift gate: all artifacts match release-plan ✅"
 
   train:
@@ -151,4 +164,45 @@ jobs:
           DRY_RUN: ${{ inputs.dryRun }}
           FROM_LAYER: ${{ inputs.fromLayer }}
           TRAIN_ID: ${{ inputs.trainId || github.run_id }}
+          MAIN_SHAS: ${{ needs.preflight.outputs.main_shas }}
+          TRAIN_MANIFEST: ${{ runner.temp }}/train-manifest.json
         run: bash scripts/release-plan/run-train.sh
+
+      # 列车清单（ADR 0053 §3/§8）：每个 step 的 repo/tag/commit/run。失败也上传（定位停在哪一层）。
+      # 写进 job summary 一份（永久可查），制品本身由 cleanup job 删除，retention 7 天兜底。
+      - name: Publish train manifest
+        if: always()
+        run: |
+          f="${{ runner.temp }}/train-manifest.json"
+          [ -f "$f" ] || { echo "无 manifest（列车未进入任何层）"; exit 0; }
+          { echo '### Train manifest'; echo '```json'; cat "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload train manifest
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: train-${{ inputs.trainId || github.run_id }}-manifest
+          path: ${{ runner.temp }}/train-manifest.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ADR 0053 §9：清理本列车的临时物（tag-ref 缓存 / 列车 deploy run 的中间制品 / 列车自身制品）。
+  # if: always()——成功与失败都清；dryRun 列车只做 dry-run 清理（只列不删）。
+  # 清理失败只告警（脚本内吞错），绝不把一次成功的列车变红。
+  cleanup:
+    needs: [plan, train]
+    if: ${{ always() && inputs.cleanup && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Clean train artifacts and tag-ref caches
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          WONTLOST_TOKEN: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
+          LAYERS: ${{ needs.plan.outputs.layers }}
+          TRAIN_ID: ${{ inputs.trainId || github.run_id }}
+          TRAIN_RUN_ID: ${{ github.run_id }}
+          PLATFORM_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dryRun }}
+          # 列车失败时保留 service deploy 的中间制品（续跑复用源），其余照删。
+          KEEP_RESUME: ${{ needs.train.result != 'success' }}
+        run: bash scripts/release-plan/cleanup-train.sh

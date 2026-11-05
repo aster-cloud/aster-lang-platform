@@ -1,0 +1,61 @@
+# ADR 0053 §9：手工清理某次发布列车留下的临时物（列车 cleanup job 没跑到时的补救）。
+#
+# 与 release-train.yml 的 cleanup job 共用 scripts/release-plan/cleanup-train.sh：
+#   - 各仓 refs/tags/<tag> 作用域的 Actions cache（永不会被 main/PR 命中）
+#   - 标题为「… train <trainId>」的 service deploy run 的中间制品
+#   - 可选：列车 run 自身的 train-<trainId>-* 制品（填 trainRunId）
+# 缺省 dry-run（只列不删）。tag 由当前 release-plan.json 推导——清理更早的列车时，
+# 从对应 tag 检出本仓（ref 选 vX）再运行即可。
+name: Cleanup Release Train
+
+on:
+  workflow_dispatch:
+    inputs:
+      trainId:
+        description: '要清理的列车标识（列车的 trainId，缺省为其 run id）'
+        type: string
+        required: true
+      trainRunId:
+        description: '列车 run id（可空；填了才删列车自身的 train-<id>-* 制品）'
+        type: string
+        required: false
+      dryRun:
+        description: '只列不删'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      layers: ${{ steps.coalesce.outputs.layers }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - id: coalesce
+        run: |
+          echo "layers=$(python3 scripts/release-plan/coalesce.py --plan release-plan.json | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)))')" >> "$GITHUB_OUTPUT"
+
+  cleanup:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Clean train artifacts and tag-ref caches
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          WONTLOST_TOKEN: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
+          LAYERS: ${{ needs.plan.outputs.layers }}
+          TRAIN_ID: ${{ inputs.trainId }}
+          TRAIN_RUN_ID: ${{ inputs.trainRunId }}
+          PLATFORM_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dryRun }}
+        run: bash scripts/release-plan/cleanup-train.sh
