@@ -55,8 +55,13 @@ delete() {  # what, endpoint
 }
 
 # (repo org workflow tag kind) 去重列表
-STEPS=$(jq -r '.[][] | [.repo, (.org // "aster-cloud"), .workflow,
-  (if .version then ((.tagPrefix // "v") + .version) else "-" end), (.kinds|join(","))] | @tsv' <<<"$LAYERS" | sort -u)
+# 解析失败只告警（review L9）：照常执行到「列车自身制品」那一步，并以 0 退出。
+if ! STEPS=$(jq -r '.[][] | [.repo, (.org // "aster-cloud"), .workflow,
+  (if .version then ((.tagPrefix // "v") + .version) else "-" end), (.kinds|join(","))] | @tsv' <<<"$LAYERS" 2>/dev/null); then
+  warn "LAYERS 解析失败，跳过各仓清理（retention 到期自动回收）"
+  STEPS=""
+fi
+STEPS=$(sort -u <<<"$STEPS")
 
 while IFS=$'\t' read -r repo org workflow tag kinds; do
   [ -n "$repo" ] || continue
