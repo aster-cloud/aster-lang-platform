@@ -36,6 +36,10 @@ jobs:
       - name: run-train.sh regression test
         run: bash scripts/release-plan/run-train.test.sh
 
+      # ADR 0053：层内并行 / stale gate / deploy run 关联 / train manifest / cleanup 的回归测试。
+      - name: train artifact-reuse regression test
+        run: bash scripts/release-plan/train-reuse.test.sh
+
       - uses: actions/setup-java@v5
         with:
           java-version: '25'
