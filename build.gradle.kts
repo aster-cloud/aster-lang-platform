@@ -185,7 +185,15 @@ group = "cloud.aster-lang"
 //   规则作函数值 tier1 样本，带词汇样本比较两引擎诊断起始行（#179–#181）；npm 包无变更，保持 1.2.0。
 //   ts npm 1.2.3（已含 Set 写回）先行发布，本次不变。runtime/validation/hi 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.38"
+// 1.0.39：ADR 0051 R55 与块作用域跟进。core：无大小写文字（中文/天城文等）的裸模式名按成员 / 绑定
+//   统一 IR 形态（#230，R55；上线前两库 R55 扫描 0 行，2026-11-05）；规则调用实参检查与 TS 对齐，
+//   调用非函数局部名报 E001（#231）。locales：语法错误文案目录迁入 locales 作为唯一真相源，德语快照
+//   diff 文案改 Sie 形式（#115/#117，ui-messages npm 1.0.26 已先行发布，本次不变）。truffle：case 分支 /
+//   Scope 内同名 Let 与模式绑定遮蔽外层（#158）；单段 builtin 名与 core CallTargetBuiltins.NAMES 双向
+//   核对（#160）。test：块作用域遮蔽与中文裸模式名 tier1 样本（#183）；npm 包无变更，保持 1.2.0。
+//   ts npm 1.2.4（ts#278）由本次列车 ts:npm 层发布。runtime/validation/hi 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.39"
 
 catalog {
     versionCatalog {
@@ -201,7 +209,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.38")
+        version("asterLang", "1.0.39")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
