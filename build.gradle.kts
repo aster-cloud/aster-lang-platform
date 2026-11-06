@@ -202,7 +202,16 @@ group = "cloud.aster-lang"
 //   局部闭包、workflow step 作用域 tier1 样本（#185）；npm 包无变更，保持 1.2.0。ts npm 1.2.5（ts#280）
 //   由本次列车 ts:npm 层发布。runtime/validation/hi 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.40"
+// 1.0.41：返回路径类型检查与 Decimal 整数模式。core：每条 Return（任意嵌套 If / Match 分支）都与声明
+//   返回类型按可赋值规则比对，E003 报在该 Return 语句上，不再只比较函数级推断结果（#240，Fixes #239；
+//   这是收紧，内层分支 Return 类型不符的存量策略会新增 E003）。truffle：整数模式 When N 对 Decimal 值按
+//   BigDecimal.compareTo 精确数值匹配（#167，此前 Decimal 上的整数模式永远落空）。locales：evaluation-
+//   diagnostics 评估诊断文案目录迁入 locales（随 aster-lang-locales-en jar 与 ui-messages npm 分发，#121，
+//   aster-api#445/#451 的前置），ui-messages npm 1.0.27 → 1.0.28 由本次列车 locales 层发布。ts npm 1.2.6
+//   （ts#284 #285 #286 #287 #288 #290）由本次列车 ts:npm 层发布。runtime/validation/hi/test 源码无变更，
+//   lockstep 重新打 tag；test npm 包无变更，保持 1.2.0。
+//
+version = "1.0.41"
 
 catalog {
     versionCatalog {
@@ -218,7 +227,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.40")
+        version("asterLang", "1.0.41")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
