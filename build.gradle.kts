@@ -211,7 +211,16 @@ group = "cloud.aster-lang"
 //   （ts#284 #285 #286 #287 #288 #290）由本次列车 ts:npm 层发布。runtime/validation/hi/test 源码无变更，
 //   lockstep 重新打 tag；test npm 包无变更，保持 1.2.0。
 //
-version = "1.0.41"
+// 1.0.42：冠词保护声明名与诊断文案。core：Canonicalizer 按语法位置保护 Define/Rule 声明名，不再把
+//   声明名开头的 a/an/the 当冠词删掉（#244，Fixes #243；canonicalize 结果变化，以冠词开头的声明名存量
+//   策略的规范化源码会不同）。locales：模块解析诊断 module.* 文案与语法目录 token.* 名词（#124），
+//   ui-messages npm 1.0.28 → 1.0.29 由本次列车 locales 层发布。ts npm 1.3.0（ts#293 新增 functions[].entry 与
+//   resolveSpelling 导出、#296 放宽未知能力 / await 参数个数、#298 冠词、#299 overlay 重新生成、#300 删除
+//   legacyCode，破坏性）由本次列车 ts:npm 层发布。补记 1.0.41：解析诊断码 E050–E069（core#241 / ts#291，
+//   R56）与顶层统一命名空间 E807（R57）已随 1.0.41 发布。runtime/validation/hi/truffle 源码无变更，lockstep
+//   重新打 tag；test 仅新增 tier1 样本（#187），npm 包无变更，保持 1.2.0。
+//
+version = "1.0.42"
 
 catalog {
     versionCatalog {
@@ -227,7 +236,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.41")
+        version("asterLang", "1.0.42")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
