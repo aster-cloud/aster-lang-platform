@@ -220,7 +220,17 @@ group = "cloud.aster-lang"
 //   R56）与顶层统一命名空间 E807（R57）已随 1.0.41 发布。runtime/validation/hi/truffle 源码无变更，lockstep
 //   重新打 tag；test 仅新增 tier1 样本（#187），npm 包无变更，保持 1.2.0。
 //
-version = "1.0.42"
+// 1.0.43：lowering 诊断码与嵌套深度守卫。core：共享码表新增 lowering 诊断码 E600–E606（#248，与 ts#303
+//   同车次）；解析嵌套深度守卫 AsterCustomLexer.MAX_NESTING_DEPTH / AstBuilder.MAX_EXPR_DEPTH 300 → 64 并改为
+//   public（#249，aster-api#472：1MB 线程栈上 157–196 层括号即栈溢出，原上限形同虚设；嵌套 >64 的存量策略会
+//   新增 E054）。locales：E051–E069 句型模板与 token 名词、de E061/E062 句式、删除 4 条死 module.* 文案（#127）；
+//   E600–E606 zh / de 译文（#128），ui-messages npm 1.0.29 → 1.0.30 由本次列车 locales 层发布。hi：E600–E606
+//   hi-IN 译文（#96，只改 Maven overlay，ui-messages-hi npm 无变更，保持 1.0.24）。ts npm 1.4.0（ts#303 新增
+//   compile() 公开字段 loweringDiagnostics、loweringErrors 标 @deprecated、overlay 重新生成；#305 表达式嵌套上限
+//   64、类型递归上限保持 300）由本次列车 ts:npm 层发布。runtime/validation/truffle 源码无变更，lockstep 重新
+//   打 tag；test 仅 parity 记录，npm 包无变更，保持 1.2.0。
+//
+version = "1.0.43"
 
 catalog {
     versionCatalog {
@@ -236,7 +246,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.42")
+        version("asterLang", "1.0.43")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
