@@ -55,6 +55,8 @@ scripts/gate-scan/gate-scan.sh --old-ts v1.4.0 --new-ts main --allow-empty-db
 
 没有本机 kubeconfig、只能 ssh 到 master-1 时，加 `--ssh-host root@master-1`：kubectl 经 `ssh -o BatchMode=yes` 在远端执行
 （参数逐个转义，导出 SQL 走 stdin；需要免密登录，不会弹口令提示）。
+`kubectl` 与 `--kube-context` 都按**远端**主机的 PATH / kubeconfig 解析，不是本机的。传给远端的值（context、namespace、pod、库名）
+不得含控制字符，且远端登录 shell 须为 bash / zsh（用 bash 的 `%q` 转义，POSIX sh 不认其输出）；含 `;`、`$()`、引号等元字符的值会被原样当作单个参数。
 
 注意：`aster_api` 在生产里目前没有任何 `policy_versions`（0 行），所以现阶段 `--allow-empty-db` 是预期用法，直到有保存的版本为止。
 `--allow-empty-db` 只放行**单边**为空：两个库合计 0 行（云端导出也为空）仍是退出码 3，因为那只可能是 context / pod / 库名错了。

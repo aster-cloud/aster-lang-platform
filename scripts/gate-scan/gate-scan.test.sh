@@ -227,6 +227,9 @@ run_script 3 export --out "$TMP/xfer-link"; expect_err '符号链接'
 rm "$TMP/xfer-link/api.jsonl"; ln -s "$TMP/link-target-cloud" "$TMP/xfer-link/cloud.jsonl"
 run_script 3 export --out "$TMP/xfer-link"; expect_err '符号链接'
 [ ! -e "$TMP/link-target-cloud" ] || fail "悬空符号链接被写穿，目标已被创建"
+rm "$TMP/xfer-link/cloud.jsonl"; echo KEEP >"$TMP/live-target"; ln -s "$TMP/live-target" "$TMP/xfer-link/api.jsonl"   # 有效链接
+run_script 3 export --out "$TMP/xfer-link"; expect_err '符号链接'
+[ "$(cat "$TMP/live-target")" = KEEP ] || fail "有效符号链接的目标被改写"
 
 CASE="--ssh-host"
 # 假 ssh：记录参数，把最后一个参数（远端命令行）交给 bash -c，stdin 原样透传；假 kubectl 在 PATH 上充当「远端」。
@@ -249,6 +252,21 @@ expect_out "$TMP/xfer-ssh/api.jsonl  5 rows"
 run_script 1 --old-ts "$OLD" --new-ts "$NEW" --ssh-host root@master-1
 expect_out '^scanned: 9 '
 FAKE_KUBECTL_FAIL=1 run_script 3 --old-ts "$OLD" --new-ts "$NEW" --ssh-host root@master-1; expect_err '导出 aster_api 失败'
+# 元字符：值必须原样到达远端 kubectl，且不被 shell 执行
+mkdir "$TMP/inj"; : >"$FAKE_KUBECTL_LOG"
+( cd "$TMP/inj" && run_script 0 export --out "$TMP/xfer-inj1" --ssh-host root@h --kube-context 'a;touch X' )
+grep -q -- '--context a;touch X ' "$FAKE_KUBECTL_LOG" || fail "含分号的值应原样到达 kubectl"
+( cd "$TMP/inj" && run_script 0 export --out "$TMP/xfer-inj2" --ssh-host root@h --kube-context "\$(touch Y)'q\"" )
+grep -qF -- "--context \$(touch Y)'q\" " "$FAKE_KUBECTL_LOG" || fail "含 \$() 与引号的值应原样到达 kubectl"
+[ -z "$(ls -A "$TMP/inj")" ] || fail "元字符被远端 shell 执行：$(ls "$TMP/inj")"
+# ssh 自身失败（连接不上）→ rc 3，且不留部分导出
+cat >"$TMP/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "ssh: connect to host h port 22: Connection refused" >&2; exit 255
+EOF
+chmod +x "$TMP/bin/ssh"
+run_script 3 export --out "$TMP/xfer-sshfail" --ssh-host root@h; expect_err '导出 aster_api 失败'
+[ -z "$(ls -A "$TMP/xfer-sshfail")" ] || fail "ssh 失败时应删除部分导出"
 rm -f "$TMP/bin/ssh"
 
 if [ -n "${GATE_SCAN_OLD_TS:-}" ] && [ -n "${GATE_SCAN_NEW_TS:-}" ]; then

@@ -233,7 +233,8 @@ export_db() {
     return 0
   fi
   log "导出 $db"
-  "${kube[@]}" <"$SQL" >"$out" || fail "导出 $db 失败（kubectl exec / psql 非零退出）"
+  # noclobber（O_EXCL）：输出文件已存在或是符号链接时拒绝写入，关闭「检查后写入」的竞态
+  ( set -C; "${kube[@]}" <"$SQL" >"$out" ) || fail "导出 $db 失败（kubectl exec / psql 非零退出）"
 }
 
 # 校验导出的完成标记与行数，行数写入 EXPORT_COUNT；为空且未 --allow-empty-db 时失败。
