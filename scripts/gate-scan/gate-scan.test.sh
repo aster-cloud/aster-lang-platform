@@ -172,6 +172,15 @@ jsonl "$CLOUD"
 run_script 3 --old-ts "$OLD" --new-ts "$NEW"; expect_err 'aster_cloud 导出为 0 行'
 run_script 1 --old-ts "$OLD" --new-ts "$NEW" --allow-empty-db; expect_out '^scanned: 5 '
 
+CASE="两库皆空"
+jsonl "$API"; jsonl "$CLOUD"
+run_script 3 --old-ts "$OLD" --new-ts "$NEW" --allow-empty-db; expect_err '合计 0 行'
+run_script 3 export --out "$TMP/xfer-empty" --allow-empty-db; expect_err '合计 0 行'
+[ -z "$(ls -A "$TMP/xfer-empty")" ] || fail "两库皆空时应删除部分导出"
+mkdir "$TMP/empty-src"; cp "$API" "$TMP/empty-src/api.jsonl"; cp "$CLOUD" "$TMP/empty-src/cloud.jsonl"
+run_script 3 scan --sources "$TMP/empty-src" --old-ts "$OLD" --new-ts "$NEW" --allow-empty-db; expect_err '合计 0 行'
+default_exports
+
 CASE="截断导出"
 jsonl "$CLOUD" --count 7 'cloud:zh=[lex:zh-CN]' 'cloud:hi=[lex:hi-IN]'
 run_script 3 --old-ts "$OLD" --new-ts "$NEW"; expect_err '完成标记 7 行，实际 2 行'
@@ -209,6 +218,38 @@ run_script 3 scan --sources "$TMP/xfer-keep" --old-ts "$OLD" --new-ts "path:$TMP
 [ ! -e "$TMP/xfer-keep/api.jsonl" ] || fail "scan 失败时也应删除导出"
 FAKE_KUBECTL_FAIL=1 run_script 3 export --out "$TMP/xfer-fail"
 [ -z "$(ls -A "$TMP/xfer-fail")" ] || fail "export 失败时应删除部分导出"
+
+CASE="export 不写穿符号链接"
+mkdir "$TMP/xfer-link"
+ln -s "$TMP/link-target-api" "$TMP/xfer-link/api.jsonl"   # 悬空：-e 为假
+run_script 3 export --out "$TMP/xfer-link"; expect_err '符号链接'
+[ ! -e "$TMP/link-target-api" ] || fail "悬空符号链接被写穿，目标已被创建"
+rm "$TMP/xfer-link/api.jsonl"; ln -s "$TMP/link-target-cloud" "$TMP/xfer-link/cloud.jsonl"
+run_script 3 export --out "$TMP/xfer-link"; expect_err '符号链接'
+[ ! -e "$TMP/link-target-cloud" ] || fail "悬空符号链接被写穿，目标已被创建"
+
+CASE="--ssh-host"
+# 假 ssh：记录参数，把最后一个参数（远端命令行）交给 bash -c，stdin 原样透传；假 kubectl 在 PATH 上充当「远端」。
+cat >"$TMP/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_SSH_LOG"
+[ "$1" = -o ] && [ "$2" = BatchMode=yes ] && [ "$3" = -- ] || { echo "ssh shim: 参数不符 $*" >&2; exit 9; }
+shift 4   # -o BatchMode=yes -- <host>
+exec bash -c "$1"
+EOF
+chmod +x "$TMP/bin/ssh"
+export FAKE_SSH_LOG="$TMP/ssh.log"; : >"$FAKE_SSH_LOG"; : >"$FAKE_KUBECTL_LOG"
+run_script 2 scan --sources "$TMP" --old-ts a --new-ts b --ssh-host h
+run_script 2 export --out "$TMP/x" --ssh-host -oProxyCommand=x
+run_script 0 export --out "$TMP/never" --ssh-host admin@h --dry-run; expect_out '+ ssh -o BatchMode=yes -- admin@h'
+run_script 0 export --out "$TMP/xfer-ssh" --ssh-host root@master-1 --kube-context 'ctx with space'
+[ "$(wc -l <"$FAKE_SSH_LOG")" -eq 2 ] || fail "export 应调用 ssh 两次"
+grep -q -- '--context ctx with space' "$FAKE_KUBECTL_LOG" || fail "远端 kubectl 应收到完整的带空格参数"
+expect_out "$TMP/xfer-ssh/api.jsonl  5 rows"
+run_script 1 --old-ts "$OLD" --new-ts "$NEW" --ssh-host root@master-1
+expect_out '^scanned: 9 '
+FAKE_KUBECTL_FAIL=1 run_script 3 --old-ts "$OLD" --new-ts "$NEW" --ssh-host root@master-1; expect_err '导出 aster_api 失败'
+rm -f "$TMP/bin/ssh"
 
 if [ -n "${GATE_SCAN_OLD_TS:-}" ] && [ -n "${GATE_SCAN_NEW_TS:-}" ]; then
   CASE="真实构建 #250"

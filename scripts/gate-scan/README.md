@@ -42,6 +42,23 @@ scripts/gate-scan/gate-scan.sh --old-ts v1.4.0 --new-ts fix/250-type-nesting-gua
 scripts/gate-scan/gate-scan.sh --old-ts v1.4.0 --new-ts main --kube-context <prod-context>
 ```
 
+### 单机（已验证的本地配置）
+
+整套流程可以在一台 Mac 上跑完，不需要 master-1 上的 checkout：
+
+```bash
+export PATH=/opt/homebrew/opt/node@24/bin:$PATH     # Node 24 必须在 PATH 最前
+export ASTER_TS_REPO=~/IdeaProjects/aster-lang-ts    # git ref 模式需要
+export KUBECONFIG=<集群 kubeconfig 路径>             # 本机直连集群
+scripts/gate-scan/gate-scan.sh --old-ts v1.4.0 --new-ts main --allow-empty-db
+```
+
+没有本机 kubeconfig、只能 ssh 到 master-1 时，加 `--ssh-host root@master-1`：kubectl 经 `ssh -o BatchMode=yes` 在远端执行
+（参数逐个转义，导出 SQL 走 stdin；需要免密登录，不会弹口令提示）。
+
+注意：`aster_api` 在生产里目前没有任何 `policy_versions`（0 行），所以现阶段 `--allow-empty-db` 是预期用法，直到有保存的版本为止。
+`--allow-empty-db` 只放行**单边**为空：两个库合计 0 行（云端导出也为空）仍是退出码 3，因为那只可能是 context / pod / 库名错了。
+
 ### 分步（kubectl 在 master-1，Node / ts 在本机）
 
 ```bash
@@ -51,7 +68,7 @@ ssh master-1 'cd aster-lang-platform && scripts/gate-scan/gate-scan.sh export --
 
 # 2. 拷到本机（本机目标目录先建好并收紧权限），随即删除 master-1 上的那份
 mkdir -m 700 ~/gate-scan-export
-scp 'master-1:/tmp/gate-scan-export/*.jsonl' ~/gate-scan-export/
+scp 'master-1:/tmp/gate-scan-export/*.jsonl' ~/gate-scan-export/ && chmod 600 ~/gate-scan-export/*.jsonl
 ssh master-1 'rm -rf /tmp/gate-scan-export'
 
 # 3. 在本机扫描；结束时（成功或失败）自动删除 ~/gate-scan-export 下的导出及空目录
@@ -60,7 +77,7 @@ scripts/gate-scan/gate-scan.sh scan --sources ~/gate-scan-export \
 ```
 
 `scan` 加 `--keep` 可保留导出（例如要对多个候选连续扫描）——用完务必手工删除。`export` 拒绝覆盖已存在的导出文件，
-导出失败时删除已写的部分文件。
+导出失败时删除已写的部分文件；目标位置已有文件或符号链接（含悬空链接）同样拒绝，不会写穿链接。
 
 先看会执行什么（不构建、不连集群、不删文件）：加 `--dry-run`。其它选项见 `--help`
 （`--namespace`、`--pod`、`--api-db`、`--cloud-db`，缺省 `data-services` / `shared-postgres-1` / `aster_api` / `aster_cloud`）。
@@ -96,7 +113,9 @@ result: FAIL (1 reported)
 - 退出码：`0` 报告为空（通过）；`1` 有报告项（需人工确认）；`2` 用法错误；
   `3` 环境 / 构建 / 导出 / 扫描失败——包括：kubectl 或 psql 失败、任一库导出为 0 行（`--allow-empty-db` 可放行）、
   完成标记缺失或与行数不符（导出被截断）、JSONL 损坏、金丝雀源在某个构建上编译失败（构建损坏）、
-  scan.mjs 没有输出 `result:` 行、任何意外命令失败。**只有退出码 0 才算通过。**
+  两个库合计 0 行（即使加了 `--allow-empty-db`）、scan.mjs 没有输出 `result:` 行、任何意外命令失败。**只有退出码 0 才算通过。**
+- **退出码 1 但没有 `result:` 行 = 脚本崩溃（如 bash / node 自身出错），不是「有报告项」。** 真正的「有报告项」一定以
+  `result: FAIL (N reported)` 结尾；没有这一行的 1 一律当作失败处理，先看 stderr。
 - 诊断码取自 ts `compile()` 返回的 `parseErrors`、`loweringDiagnostics`、`resolutionDiagnostics`（规范化为大写）；
   只有无码的 `loweringErrors` 时记为 `UNCODED`，`compile()` 抛异常记为 `THROW`，新版缺 lexicon 记为 `NO_LEXICON`。不含类型检查阶段。
 
