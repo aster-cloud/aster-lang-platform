@@ -230,7 +230,18 @@ group = "cloud.aster-lang"
 //   64、类型递归上限保持 300）由本次列车 ts:npm 层发布。runtime/validation/truffle 源码无变更，lockstep 重新
 //   打 tag；test 仅 parity 记录，npm 包无变更，保持 1.2.0。
 //
-version = "1.0.43"
+// 1.0.44：类型嵌套守卫、未知效果名与规则输入引用（R62）。core：类型嵌套改在词法期守卫，上限 64 先于栈溢出
+//   报 E054（#253，Fixes #250；类型嵌套 >64 的存量策略会新增 E054）；治理 lowering 为每条 Verdict 规则产出
+//   Func.inputRefs，新增 E708（档案要求 verifiedInputs 而规则 inputRefs 为 ["*"]），控制注册表 1.2.0 增
+//   requires.verifiedInputs（#257，R62；两个档案都为 false，本版本不新增诊断）；注册表 requires 含未知键时
+//   加载成功且忽略（#252，R62 X1）。locales：控制注册表 1.2.0 与 E708 zh / de 译文（#130，只改 Maven 制品，
+//   ui-messages npm 无变更，保持 1.0.30）。hi：E708 hi-IN 译文（#98，只改 Maven overlay，ui-messages-hi npm
+//   无变更，保持 1.0.24）。ts npm 1.5.0（ts#308 接受任意基效果名、未知效果按 pure
+//   检查并保留在 IR，Fixes #304；#311 类型嵌套上限 300 → 64；#312 Core.Func.inputRefs、E708 与注册表 1.2.0；
+//   #307 注册表未知键）由本次列车 ts:npm 层发布。test：未知效果名与 R62 输入引用 tier1 样本（#191 #192），npm
+//   包无变更，保持 1.2.0。runtime/validation/truffle 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.44"
 
 catalog {
     versionCatalog {
@@ -246,7 +257,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.43")
+        version("asterLang", "1.0.44")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
