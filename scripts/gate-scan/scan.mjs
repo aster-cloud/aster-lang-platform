@@ -4,11 +4,17 @@
 //
 // 用法：
 //   node scan.mjs --old <ts dist> --new <ts dist> --sources <jsonl> [--sources <jsonl> ...] [--code E054]
+//                 [--allow-empty-api] [--allow-empty-cloud]
 //
 //   --old / --new  aster-lang-ts 构建产物目录（含 src/browser.js 的 dist；也接受仓库根，自动取其 dist/）
 //   --sources      export-policy-sources.sql 的输出：每行 {"id", "kind", "content"}，并且必须恰好有一行
 //                  完成标记 {"_count": N}，N 等于源行数（防止截断的导出被当成完整导出）。可重复。
 //   --code X       只看诊断码 X：报告「旧版无 X、新版有 X」的源（#250 判据）
+//   --allow-empty-api    允许 api-policy-version 源为 0（gate-scan.sh 的 --allow-empty-api-db）
+//   --allow-empty-cloud  允许 cloud 源为 0（只由旧旗标 --allow-empty-db 传入，保留其单边放行的原义）
+//
+// 开头打印按 kind 的源计数 `sources: cloud-policy=N cloud-policy-version=M api-policy-version=K`；
+// 未放行时 cloud 两种合计为 0 或 api 为 0 → 退出码 3（空扫描不算通过）。
 //
 // 报告组（任一组非空即 FAIL）：
 //   throws-on-new           新版 compile() 在任一 lexicon 下抛异常的源（不论旧版如何）
@@ -35,27 +41,16 @@
 // 防止解析器日志带出源码。输出只含 id、kind、lexicon 与诊断码，**绝不打印源码内容**。
 //
 // 退出码：0 = 报告集合为空；1 = 报告集合非空；2 = 用法错误或意外崩溃；
-//         3 = 输入或构建不可信（JSONL 损坏、完成标记缺失/不符、金丝雀失败、lexicon 无法加载）。
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+//         3 = 输入或构建不可信（JSONL 损坏、完成标记缺失/不符、未放行的空导出、金丝雀失败、lexicon 无法加载）。
 import { parseArgs } from 'node:util';
+import {
+  buildVersion, checkSourceCounts, importFrom, invalidInput, loadLexicons, orderLexiconIds, readSources,
+  resolveDist, runMain, silently, usageError,
+} from './common.mjs';
 
-const PREFERRED_LEXICONS = ['en-US', 'zh-CN', 'de-DE'];
-const LOCALE_FILE = /^[a-z]{2}-[A-Z]{2}\.js$/;
 const CODE_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 const CANARY = 'Module gate.canary.\n\nRule identity given x as Int, produce Int:\n  Return x.';
 const MISSING_LEXICON = Object.freeze({ ok: false, parseClean: false, threw: false, codes: ['NO_LEXICON'] });
-const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug', 'trace', 'dir', 'table'];
-
-class ScanError extends Error {
-  constructor(message, exitCode) {
-    super(message);
-    this.exitCode = exitCode;
-  }
-}
-const usageError = message => new ScanError(message, 2);
-const invalidInput = message => new ScanError(message, 3);
 
 const normalizeCode = code => String(code).trim().toUpperCase();
 
@@ -68,6 +63,8 @@ function parseCli() {
         new: { type: 'string' },
         sources: { type: 'string', multiple: true },
         code: { type: 'string' },
+        'allow-empty-api': { type: 'boolean' },
+        'allow-empty-cloud': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
       strict: true,
@@ -86,45 +83,12 @@ function parseCli() {
   return values;
 }
 
-/** 接受 dist 目录或仓库根目录，返回含 src/browser.js 的 dist 绝对路径。 */
-function resolveDist(path) {
-  const abs = resolve(path);
-  if (existsSync(join(abs, 'src/browser.js'))) return abs;
-  if (existsSync(join(abs, 'dist/src/browser.js'))) return join(abs, 'dist');
-  throw usageError(`${path} 不是 aster-lang-ts 构建产物（找不到 src/browser.js 或 dist/src/browser.js）`);
-}
-
-const importFrom = (dist, rel) => import(pathToFileURL(join(dist, rel)).href);
-
-/** 读取构建目录下所有 xx-YY.js 词法表；找不到 lexicon 导出的文件直接判为构建不可信。 */
-async function loadLexicons(dist) {
-  const dir = join(dist, 'src/config/lexicons');
-  if (!existsSync(dir)) throw invalidInput(`${dist} 缺少 src/config/lexicons`);
-  const lexicons = new Map();
-  for (const file of readdirSync(dir).filter(f => LOCALE_FILE.test(f)).sort()) {
-    const mod = await importFrom(dist, `src/config/lexicons/${file}`);
-    const lexicon = Object.values(mod).find(v => v && typeof v === 'object' && typeof v.id === 'string');
-    if (!lexicon) throw invalidInput(`${dist}: ${file} 没有导出带 id 的 lexicon 对象`);
-    lexicons.set(lexicon.id, lexicon);
-  }
-  if (lexicons.size === 0) throw invalidInput(`${dist} 没有任何 lexicon`);
-  return lexicons;
-}
-
-/** lexicon id 排序：首选顺序在前，其余按名称。 */
-const orderLexiconIds = ids => [
-  ...PREFERRED_LEXICONS.filter(id => ids.includes(id)),
-  ...ids.filter(id => !PREFERRED_LEXICONS.includes(id)).sort(),
-];
-
 async function loadBuild(path, label) {
   const dist = resolveDist(path);
-  const pkgPath = join(dist, '../package.json');
-  const version = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, 'utf8')).version : 'unknown';
   const ts = await importFrom(dist, 'src/browser.js');
   if (typeof ts.compile !== 'function') throw invalidInput(`${label} 构建 ${dist} 没有导出 compile()`);
   const lexicons = await loadLexicons(dist);
-  const build = { label, dist, version, ts, lexicons, lexiconIds: orderLexiconIds([...lexicons.keys()]) };
+  const build = { label, dist, version: buildVersion(dist), ts, lexicons, lexiconIds: orderLexiconIds([...lexicons.keys()]) };
   build.stats = { attempts: 0, ok: 0, threw: 0 };
   checkCanary(build);
   return build;
@@ -136,23 +100,6 @@ function checkCanary(build) {
   const result = diagnose(build.ts, CANARY, lexicon);
   if (!result.ok) {
     throw invalidInput(`${build.label} 构建（${build.dist}）连金丝雀源都编译失败 {${result.codes.join(',')}}——构建损坏，扫描结果不可信`);
-  }
-}
-
-/** 同步执行 fn，期间屏蔽 console 与 stdout/stderr 写入，防止被扫描代码打印源码。 */
-function silently(fn) {
-  const savedConsole = CONSOLE_METHODS.map(name => [name, console[name]]);
-  const savedOut = process.stdout.write;
-  const savedErr = process.stderr.write;
-  for (const name of CONSOLE_METHODS) console[name] = () => {};
-  process.stdout.write = () => true;
-  process.stderr.write = () => true;
-  try {
-    return fn();
-  } finally {
-    for (const [name, method] of savedConsole) console[name] = method;
-    process.stdout.write = savedOut;
-    process.stderr.write = savedErr;
   }
 }
 
@@ -215,37 +162,6 @@ function classify(runs, code) {
   return { group: 'changed-codes', shown: differing };
 }
 
-/** 读取一个导出文件并校验完成标记；任何损坏都判为输入不可信。 */
-function readSourceFile(file) {
-  if (!existsSync(file)) throw invalidInput(`${file} 不存在`);
-  const rows = [];
-  const markers = [];
-  readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
-    if (!line.trim()) return;
-    let row;
-    try {
-      row = JSON.parse(line);
-    } catch {
-      throw invalidInput(`${file} 第 ${index + 1} 行不是合法 JSON`);
-    }
-    if (row && typeof row === 'object' && '_count' in row) {
-      markers.push(row._count);
-      return;
-    }
-    if (typeof row?.id !== 'string' || typeof row?.content !== 'string') {
-      throw invalidInput(`${file} 第 ${index + 1} 行缺少字符串字段 id / content`);
-    }
-    rows.push({ id: row.id, kind: typeof row.kind === 'string' ? row.kind : 'unknown', content: row.content });
-  });
-  if (markers.length !== 1) {
-    throw invalidInput(`${file} 应恰好有 1 行完成标记 {"_count": N}，实际 ${markers.length} 行——导出可能被截断`);
-  }
-  if (markers[0] !== rows.length) {
-    throw invalidInput(`${file} 完成标记 _count=${markers[0]} 与实际源行数 ${rows.length} 不符——导出被截断或损坏`);
-  }
-  return rows;
-}
-
 const fmtOutcome = o => `{${o.codes.join(',')}}${o.ok ? '' : '!'}`;
 const fmtStats = s => `${s.ok} ok, ${s.threw} threw, ${s.attempts - s.ok} not ok / ${s.attempts} compiles`;
 
@@ -270,10 +186,11 @@ function printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly
 async function main() {
   const args = parseCli();
   if (args.help) {
-    console.log('用法：node scan.mjs --old <ts dist> --new <ts dist> --sources <jsonl> [--sources <jsonl> ...] [--code E054]');
+    console.log('用法：node scan.mjs --old <ts dist> --new <ts dist> --sources <jsonl> [--sources <jsonl> ...] [--code E054] [--allow-empty-api] [--allow-empty-cloud]');
     return 0;
   }
-  const sources = args.sources.flatMap(readSourceFile);
+  const sources = readSources(args.sources);
+  checkSourceCounts(sources, { allowEmptyApi: args['allow-empty-api'], allowEmptyCloud: args['allow-empty-cloud'] });
   const oldBuild = await loadBuild(args.old, 'old');
   const newBuild = await loadBuild(args.new, 'new');
 
@@ -294,15 +211,4 @@ async function main() {
   return printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly });
 }
 
-try {
-  process.exitCode = await main();
-} catch (error) {
-  if (error instanceof ScanError) {
-    console.error(`scan.mjs: ${error.message}`);
-    process.exitCode = error.exitCode;
-  } else {
-    // 意外崩溃只打印错误类型与消息，不打印堆栈里可能夹带的输入片段。
-    console.error(`scan.mjs: 意外错误 ${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`);
-    process.exitCode = 2;
-  }
-}
+await runMain('scan.mjs', main);

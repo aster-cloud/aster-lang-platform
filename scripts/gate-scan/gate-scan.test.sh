@@ -8,6 +8,8 @@
 #
 # 可选端到端（真实构建，合成源为类型嵌套深度 2/64/65/300，#250 期望 depth65/depth300 被报告）：
 #   GATE_SCAN_OLD_TS=<v1.4.0 构建> GATE_SCAN_NEW_TS=<fix/250 构建> bash scripts/gate-scan/gate-scan.test.sh
+# 可选端到端（input-refs，真实 ts 1.5.0 构建编译三份档案源；可再给一个 1.5.0 之前的构建验证退出码 3）：
+#   GATE_SCAN_TS_150=<v1.5.0 构建> [GATE_SCAN_TS_140=<v1.4.0 构建>] bash scripts/gate-scan/gate-scan.test.sh
 # 用法：bash scripts/gate-scan/gate-scan.test.sh
 set -euo pipefail
 
@@ -68,7 +70,8 @@ if (rest[0] === '--count') { count = Number(rest[1]); rest.splice(0, 2); }
 const kinds = { api: 'api-policy-version', cloud: 'cloud-policy', cloudv: 'cloud-policy-version' };
 const lines = rest.map(spec => {
   if (spec === 'BAD') return '{not json SECRET_TEXT_bad';
-  const [id, directive = ''] = spec.split('=');
+  const eq = spec.indexOf('=');   // 只按第一个 = 切分：指令里可以再含 =
+  const [id, directive] = eq < 0 ? [spec, ''] : [spec.slice(0, eq), spec.slice(eq + 1)];
   return JSON.stringify({ id, kind: kinds[id.split(':')[0]], content: `Module m.SECRET_TEXT_${id.replace(':', '_')}. ${directive}` });
 });
 const n = count ?? lines.length;
@@ -89,10 +92,17 @@ echo "$*" >>"$FAKE_KUBECTL_LOG"
 sql="$(cat)"
 grep -q 'READ ONLY' <<<"$sql" || { echo "shim: SQL 不是只读事务" >&2; exit 9; }
 [ "${FAKE_KUBECTL_FAIL:-}" = 1 ] && { echo "shim: error: unable to upgrade connection" >&2; exit 1; }
-case " $* " in
-  *" -d aster_api "*) cat "$FAKE_API_JSONL" ;;
-  *" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_JSONL" ;;
-  *) echo "shim: 未知库 $*" >&2; exit 9 ;;
+# 按 SQL 内容区分三份导出：源码（export-policy-sources）、影响面（export-profile-impact）、对账集合（export-profile-ids）
+if grep -q 'gatedExecutions30d' <<<"$sql"; then what=IMPACT
+elif grep -q 'Profil' <<<"$sql"; then what=IDS
+else what=SRC; fi
+case "$what: $* " in
+  "SRC:"*" -d aster_api "*) cat "$FAKE_API_JSONL" ;;
+  "SRC:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_JSONL" ;;
+  "IMPACT:"*" -d aster_api "*) cat "$FAKE_API_IMPACT_JSONL" ;;
+  "IMPACT:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_IMPACT_JSONL" ;;
+  "IDS:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_IDS_JSONL" ;;
+  *) echo "shim: 未知库 / 导出 $what $*" >&2; exit 9 ;;
 esac
 EOF
 chmod +x "$TMP/bin/kubectl"
@@ -269,6 +279,196 @@ run_script 3 export --out "$TMP/xfer-sshfail" --ssh-host root@h; expect_err '导
 [ -z "$(ls -A "$TMP/xfer-sshfail")" ] || fail "ssh 失败时应删除部分导出"
 rm -f "$TMP/bin/ssh"
 
+# ---------- input-refs 子命令 ----------
+# 假 ts 1.5.0 构建：compileAndTypecheck 按源码指令产出 Core IR（profile、Verdict 规则的 inputRefs）与 E708；
+# 指令：[profile:<id>] [module:<名>] [rule:<名>=<路径,路径>|*:<construct>|ROOT] [fail]，外加 [lex:<id>]（同上）。
+# 金丝雀（真实 Aster 语法，按 Profile "…" 与是否含 Map.get 识别）同样处理。故意把源码打到 console / stdout。
+# variant：v150 正常；v140 不写 inputRefs、无 E708（ts 1.4.0）；noflip 无视注入的注册表（永不报 E708）。
+make_ir_build() {  # 目录 variant lexicon...
+  local dir="$1" variant="$2"; shift 2
+  mkdir -p "$dir/dist/src/config/lexicons"
+  echo "{\"version\":\"0.0.0-ir-$variant\",\"type\":\"module\"}" >"$dir/package.json"
+  sed "s/__VARIANT__/$variant/" >"$dir/dist/src/browser.js" <<'EOF'
+const VARIANT = '__VARIANT__';
+const profile = (id, verifiedInputs) => ({ id, requires: { ruleId: true, registeredControls: true, frameworks: [], verifiedInputs } });
+export const CONTROLS_REGISTRY = { version: '1.2.0', controls: [], frameworks: [], profiles: [profile('governed', false), profile('eu-ai-act-high-risk', false)] };
+export function controlRegistryFrom(data) {
+  const byId = new Map(data.profiles.map(p => [p.id, { id: p.id, verifiedInputs: p.requires.verifiedInputs === true }]));
+  return { version: data.version, has: () => false, profile: id => byId.get(id) };
+}
+export function compile(source, options) { return compileAndTypecheck(source, options); }
+export function compileAndTypecheck(source, options) {
+  console.log('LEAK', source); console.error('LEAK', source); process.stdout.write(`LEAK ${source}\n`);
+  const lex = options?.lexicon?.id ?? 'en-US';
+  const onlyLex = /\[lex:([\w-]+)\]/.exec(source);
+  if (/\[fail\]/.test(source) || (onlyLex && onlyLex[1] !== lex)) {
+    return { success: false, parseErrors: [{ code: 'E050', message: source }], typeErrors: [] };
+  }
+  const prof = /\[profile:([\w-]+)\]/.exec(source)?.[1] ?? /Profile "([\w-]+)"/.exec(source)?.[1];
+  const name = /\[module:([\w.]+)\]/.exec(source)?.[1] ?? (/^Module gate\.canary/.test(source) ? 'gate.canary' : 'm');
+  const rules = [...source.matchAll(/\[rule:(\w+)=([^\]]*)\]/g)].map(m => [m[1], m[2]]);
+  if (/^Module gate\.canary/.test(source)) rules.push(['decide', source.includes('Map.get(') ? '*:dynamic-map-key' : 'context.amount']);
+  const verified = prof !== undefined && VARIANT !== 'noflip' && options?.controls?.profile?.(prof)?.verifiedInputs === true;
+  const typeErrors = [];
+  const decls = rules.map(([rule, spec]) => {
+    const fn = { kind: 'Func', name: rule };
+    if (prof === undefined || VARIANT === 'v140') return fn;
+    if (spec.startsWith('*:')) {
+      fn.inputRefs = ['*'];
+      if (verified) typeErrors.push({ code: 'E708', severity: 'error', message: source, data: { rule, profile: prof, construct: spec.slice(2) } });
+    } else {
+      fn.inputRefs = spec === 'ROOT' ? [''] : spec.split(',').filter(Boolean);
+    }
+    return fn;
+  });
+  const core = { kind: 'Module', name, decls, ...(prof !== undefined ? { profile: prof } : {}) };
+  return { success: true, core, typeErrors };
+}
+EOF
+  local id
+  for id in "$@"; do
+    echo "export const LEX_${id/-/_} = { id: '$id', keywords: {} };" >"$dir/dist/src/config/lexicons/$id.js"
+  done
+}
+make_ir_build "$TMP/ir-150" v150 en-US zh-CN de-DE hi-IN
+make_ir_build "$TMP/ir-140" v140 en-US zh-CN de-DE hi-IN
+make_ir_build "$TMP/ir-noflip" noflip en-US zh-CN de-DE hi-IN
+TS150="path:$TMP/ir-150"
+
+# 原样写 JSONL（影响面 / 对账集合）：输出文件 行... ，末尾自动加完成标记
+rawjsonl() { local out="$1"; shift; { [ $# -eq 0 ] || printf '%s\n' "$@"; echo "{\"_count\" : $#}"; } >"$out"; }
+API_IMPACT="$TMP/api-impact.jsonl"; CLOUD_IMPACT="$TMP/cloud-impact.jsonl"; IDS="$TMP/profile-ids.jsonl"
+export FAKE_API_IMPACT_JSONL="$API_IMPACT" FAKE_CLOUD_IMPACT_JSONL="$CLOUD_IMPACT" FAKE_IDS_JSONL="$IDS"
+ir_exports() {
+  jsonl "$API"
+  jsonl "$CLOUD" 'cloud:lit=[profile:eu-ai-act-high-risk][module:credit.pilot][rule:decide=context.amount,principal.id]' \
+    'cloud:gov=[profile:governed][rule:decide=*:dynamic-map-key]' \
+    'cloudv:dyn=[profile:eu-ai-act-high-risk][module:credit.pilot][rule:decide=*:dynamic-map-key]'
+  rawjsonl "$API_IMPACT" '{"tenant":"team-a","issuer":"aster-cloud","kid":"k1","enabled":true,"notAfter":null}' \
+    '{"tenant":"user-b","issuer":"aster-cloud","kid":"k0","enabled":false,"notAfter":null}'
+  rawjsonl "$CLOUD_IMPACT" '{"id":"cloud:lit","tenant":"team-a","gatedExecutions30d":3}' \
+    '{"id":"cloud:gov","tenant":"team-a","gatedExecutions30d":0}' '{"id":"cloudv:dyn","tenant":"user-b","gatedExecutions30d":0}'
+  rawjsonl "$IDS" '{"id":"cloud:lit"}' '{"id":"cloud:gov"}' '{"id":"cloudv:dyn"}'
+}
+IR=(input-refs --ts "$TS150" --profile eu-ai-act-high-risk)
+
+CASE="input-refs 用法"
+run_script 0 input-refs --help; expect_out '--profile'
+run_script 2 input-refs --profile eu-ai-act-high-risk
+run_script 2 input-refs --ts "$TS150"
+run_script 2 input-refs --ts "$TS150" --profile 'Bad Profile'
+run_script 2 input-refs --ts "$TS150" --profile eu-ai-act-high-risk --old-ts x
+run_script 2 input-refs --ts "$TS150" --profile eu-ai-act-high-risk --impact "$TMP/x.jsonl"   # --impact 只用于 --sources
+CASE="legacyAllowEmptyDbRejectedForInputRefs"
+run_script 2 "${IR[@]}" --allow-empty-db; expect_err '--allow-empty-api-db'
+
+CASE="input-refs dry-run"
+: >"$FAKE_KUBECTL_LOG"
+run_script 0 input-refs --ts v1.5.0 --profile eu-ai-act-high-risk --allow-empty-api-db --dry-run
+expect_out 'export-profile-impact.sql'
+expect_out 'export-profile-ids.sql'
+expect_out 'input-refs.mjs --ts .* --profile eu-ai-act-high-risk .*--allow-empty-api .*--impact .*--impact .*--profile-ids '
+[ ! -s "$FAKE_KUBECTL_LOG" ] || fail "dry-run 不应调用 kubectl"
+
+CASE="input-refs 三份夹具（字面路径 / 动态键 / governed）"
+ir_exports
+: >"$FAKE_KUBECTL_LOG"
+run_script 1 "${IR[@]}" --allow-empty-api-db
+[ "$(wc -l <"$FAKE_KUBECTL_LOG")" -eq 5 ] || fail "一体化 input-refs 应调用 kubectl 五次（源码×2、影响面×2、对账×1）"
+expect_group input-refs 'cloud:lit cloudv:dyn '
+expect_out '^  cloudv:dyn kind=cloud-policy-version lexicon=en-US module=credit.pilot rule=decide inputRefs=\["\*"\] flags=STAR construct=dynamic-map-key '
+expect_out '^  cloud:lit kind=cloud-policy lexicon=en-US module=credit.pilot rule=decide inputRefs=\["context.amount","principal.id"\] flags=- construct=- '
+CASE="--impact 合入租户与执行数"
+expect_out '^  cloud:lit .* tenant=team-a gatedExecutions30d=3 tenantHasEnabledIssuer=yes$'
+expect_out '^  cloudv:dyn .* tenant=user-b gatedExecutions30d=0 tenantHasEnabledIssuer=no$'
+expect_out '^modules: 2$'
+expect_out '^rules: 2$'
+expect_out '^star-rules: 1 (dynamic-map-key=1)$'
+expect_out '^whole-input-serialized: 0$'
+expect_out '^root-rules: 0$'
+expect_out '^tenants: 2 (without enabled issuer: 1)$'
+expect_out '^result: STAR (1 STAR rules)$'
+CASE="sourceCountsPrinted"
+expect_out '^sources: cloud-policy=2 cloud-policy-version=1 api-policy-version=0$'
+CASE="reconcileMatchPasses"
+expect_out '^reconcile: sql=3 scan=3 onlyInSql=\[\] onlyInScan=\[\]$'
+
+CASE="apiExportEmptyAllowedWithFlag"
+jsonl "$CLOUD" 'cloud:lit=[profile:eu-ai-act-high-risk][rule:decide=context.amount]'
+rawjsonl "$CLOUD_IMPACT" '{"id":"cloud:lit","tenant":"team-a","gatedExecutions30d":3}'
+rawjsonl "$IDS" '{"id":"cloud:lit"}'
+run_script 0 "${IR[@]}" --allow-empty-api-db; expect_out '^result: PASS (0 STAR rules)$'
+run_script 3 "${IR[@]}"; expect_err 'aster_api 导出为 0 行'
+CASE="ROOT 标记"
+jsonl "$CLOUD" 'cloud:lit=[profile:eu-ai-act-high-risk][rule:decide=ROOT]'
+run_script 0 "${IR[@]}" --allow-empty-api-db
+expect_out '^  cloud:lit .* inputRefs=\[""\] flags=ROOT construct=- '; expect_out '^root-rules: 1$'
+
+CASE="cloudExportEmptyIsExit3"
+ir_exports; jsonl "$CLOUD"; rawjsonl "$CLOUD_IMPACT"; rawjsonl "$IDS"
+run_script 3 "${IR[@]}" --allow-empty-api-db; expect_err 'aster_cloud 导出为 0 行'
+CASE="reconcileMismatchIsExit4"
+ir_exports; rawjsonl "$IDS" '{"id":"cloud:lit"}' '{"id":"cloud:gov"}' '{"id":"cloudv:dyn"}' '{"id":"cloud:extra"}'
+run_script 4 "${IR[@]}" --allow-empty-api-db
+expect_out '^reconcile: sql=4 scan=3 onlyInSql=\[cloud:extra\] onlyInScan=\[\]$'
+expect_out '^result: RECONCILE-MISMATCH '
+CASE="对账：编译失败的档案源只在 SQL 集合"
+ir_exports
+jsonl "$CLOUD" 'cloud:lit=[profile:eu-ai-act-high-risk][rule:decide=context.amount]' 'cloud:gov=[profile:governed][fail]'
+rawjsonl "$IDS" '{"id":"cloud:lit"}' '{"id":"cloud:gov"}'
+run_script 4 "${IR[@]}" --allow-empty-api-db
+expect_out '^reconcile: sql=2 scan=1 onlyInSql=\[cloud:gov\] onlyInScan=\[\]$'
+expect_group compile-failed 'cloud:gov '
+
+CASE="input-refs：ts 1.4.0 构建"
+ir_exports
+run_script 3 input-refs --ts "path:$TMP/ir-140" --profile eu-ai-act-high-risk --allow-empty-api-db; expect_err '1.5.0'
+CASE="input-refs：注册表注入无效"
+run_script 3 input-refs --ts "path:$TMP/ir-noflip" --profile eu-ai-act-high-risk --allow-empty-api-db; expect_err 'E708'
+CASE="input-refs：未知档案"
+run_script 3 input-refs --ts "$TS150" --profile no-such-profile --allow-empty-api-db; expect_err "没有档案 no-such-profile"   # .mjs 的用法错误在入口层一律为 3
+CASE="input-refs：影响面缺行"
+rawjsonl "$CLOUD_IMPACT" '{"id":"cloud:lit","tenant":"team-a","gatedExecutions30d":3}'
+run_script 3 "${IR[@]}" --allow-empty-api-db; expect_err 'cloudv:dyn'
+CASE="input-refs：对账导出截断"
+ir_exports; printf '%s\n' '{"id":"cloud:lit"}' '{"_count" : 3}' >"$IDS"
+run_script 3 "${IR[@]}" --allow-empty-api-db; expect_err '完成标记'
+CASE="input-refs：kubectl 失败"
+ir_exports
+FAKE_KUBECTL_FAIL=1 run_script 3 "${IR[@]}" --allow-empty-api-db; expect_err '导出 aster_api 失败'
+
+CASE="input-refs 分步（export --with-input-refs + input-refs --sources）"
+ir_exports
+run_script 0 export --out "$TMP/irx" --with-input-refs --allow-empty-api-db
+for f in api cloud api-impact cloud-impact profile-ids; do [ -f "$TMP/irx/$f.jsonl" ] || fail "缺 $f.jsonl"; done
+run_script 2 input-refs --sources "$TMP/irx" --ts "$TS150" --profile eu-ai-act-high-risk --ssh-host h
+run_script 1 input-refs --sources "$TMP/irx" --ts "$TS150" --profile eu-ai-act-high-risk --allow-empty-api-db \
+  --impact "$TMP/irx/api-impact.jsonl" --impact "$TMP/irx/cloud-impact.jsonl" --profile-ids "$TMP/irx/profile-ids.jsonl"
+expect_out '^reconcile: sql=3 scan=3 '
+[ ! -e "$TMP/irx/api.jsonl" ] && [ ! -e "$TMP/irx/cloud.jsonl" ] || fail "input-refs --sources 结束后应删除源码导出"
+cp "$CLOUD" "$TMP/irx/cloud.jsonl"; cp "$API" "$TMP/irx/api.jsonl"
+run_script 1 input-refs --sources "$TMP/irx" --ts "$TS150" --profile eu-ai-act-high-risk --allow-empty-api-db --keep
+expect_out '^reconcile: SKIPPED'
+[ -f "$TMP/irx/cloud.jsonl" ] || fail "--keep 应保留导出"
+rm -rf "$TMP/irx"
+
+# ---------- 常规 diff 扫描的源计数与 --allow-empty-api-db ----------
+CASE="diffScanPrintsSourceCounts"
+default_exports
+run_script 1 --old-ts "$OLD" --new-ts "$NEW"
+expect_out '^sources: cloud-policy=3 cloud-policy-version=1 api-policy-version=5$'
+CASE="diffScanAcceptsAllowEmptyApiDb"
+jsonl "$API"
+run_script 1 --old-ts "$OLD" --new-ts "$NEW" --allow-empty-api-db
+expect_out '^sources: cloud-policy=3 cloud-policy-version=1 api-policy-version=0$'
+run_script 3 --old-ts "$OLD" --new-ts "$NEW"; expect_err 'aster_api 导出为 0 行'
+mkdir "$TMP/apiempty-src"; cp "$API" "$TMP/apiempty-src/api.jsonl"; cp "$CLOUD" "$TMP/apiempty-src/cloud.jsonl"
+run_script 1 scan --sources "$TMP/apiempty-src" --old-ts "$OLD" --new-ts "$NEW" --allow-empty-api-db
+CASE="diffScanCloudEmptyIsExit3WithApiFlag"
+default_exports; jsonl "$CLOUD"
+run_script 3 --old-ts "$OLD" --new-ts "$NEW" --allow-empty-api-db; expect_err 'aster_cloud 导出为 0 行'
+default_exports
+
 if [ -n "${GATE_SCAN_OLD_TS:-}" ] && [ -n "${GATE_SCAN_NEW_TS:-}" ]; then
   CASE="真实构建 #250"
   node -e '
@@ -287,6 +487,38 @@ fs.writeFileSync(process.argv[2], [row("cloud:depth65", "cloud-policy", 65), row
   run_script 0 --old-ts "path:$GATE_SCAN_OLD_TS" --new-ts "path:$GATE_SCAN_OLD_TS"
 else
   echo "SKIP: 未设置 GATE_SCAN_OLD_TS / GATE_SCAN_NEW_TS，跳过真实构建端到端"
+fi
+
+if [ -n "${GATE_SCAN_TS_150:-}" ]; then
+  CASE="真实构建 input-refs"
+  # 三份真实源：字面路径（adr-01）、动态 Map 键（adr-06）、同一规则改为 Profile "governed"；哨兵串放在字符串字面量里
+  node -e '
+const fs = require("fs");
+const head = (name, profile) => `Module ${name}.\nProfile "${profile}".\n\nDefine GuardContext has amount as Decimal, tier as Text, band as Text, meta as Map Text to Text.\nDefine GuardRequest has principal_roles as List of Text, action as Text, context as GuardContext.\n\n@id("R-1")\n@control("EU_AI_ACT:ART14")\nRule decide given req as GuardRequest, produce Verdict:\n`;
+const lit = head("real.lit", "eu-ai-act-high-risk") + `  If req.context.amount at least 50000:\n    Return Verdict.escalate("SECRET_TEXT_lit").\n  Return Verdict.allow().\n`;
+const dyn = p => head("real.dyn", p) + `  Let k be req.action.\n  If Maybe.withDefault(Map.get(req.context.meta, k), "") equals to "SECRET_TEXT_dyn":\n    Return Verdict.escalate("eu").\n  Return Verdict.allow().\n`;
+const row = (id, kind, content) => JSON.stringify({ id, kind, content });
+fs.writeFileSync(process.argv[1], "{\"_count\" : 0}\n");
+fs.writeFileSync(process.argv[2], [row("cloud:lit", "cloud-policy", lit), row("cloud:gov", "cloud-policy", dyn("governed")),
+  row("cloudv:dyn", "cloud-policy-version", dyn("eu-ai-act-high-risk")), "{\"_count\" : 3}"].join("\n") + "\n");
+' "$API" "$CLOUD"
+  rawjsonl "$IDS" '{"id":"cloud:lit"}' '{"id":"cloud:gov"}' '{"id":"cloudv:dyn"}'
+  rawjsonl "$API_IMPACT"
+  rawjsonl "$CLOUD_IMPACT" '{"id":"cloud:lit","tenant":"t1","gatedExecutions30d":1}' \
+    '{"id":"cloud:gov","tenant":"t1","gatedExecutions30d":0}' '{"id":"cloudv:dyn","tenant":"t2","gatedExecutions30d":2}'
+  run_script 1 input-refs --ts "path:$GATE_SCAN_TS_150" --profile eu-ai-act-high-risk --allow-empty-api-db
+  expect_group input-refs 'cloud:lit cloudv:dyn '
+  expect_out '^  cloud:lit kind=cloud-policy lexicon=en-US module=real.lit rule=decide inputRefs=\["context.amount"\] flags=- construct=- tenant=t1 '
+  expect_out '^  cloudv:dyn .* inputRefs=\["\*"\] flags=STAR construct=dynamic-map-key tenant=t2 gatedExecutions30d=2 tenantHasEnabledIssuer=no$'
+  expect_out '^sources: cloud-policy=2 cloud-policy-version=1 api-policy-version=0$'
+  expect_out '^reconcile: sql=3 scan=3 onlyInSql=\[\] onlyInScan=\[\]$'
+  ! grep -q 'Verdict\.' "$TMP/out" "$TMP/err" || fail "输出泄露了源码内容"
+  if [ -n "${GATE_SCAN_TS_140:-}" ]; then
+    run_script 3 input-refs --ts "path:$GATE_SCAN_TS_140" --profile eu-ai-act-high-risk --allow-empty-api-db
+  fi
+  default_exports
+else
+  echo "SKIP: 未设置 GATE_SCAN_TS_150，跳过 input-refs 真实构建端到端"
 fi
 
 echo "PASS"
