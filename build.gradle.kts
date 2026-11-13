@@ -241,7 +241,17 @@ group = "cloud.aster-lang"
 //   #307 注册表未知键）由本次列车 ts:npm 层发布。test：未知效果名与 R62 输入引用 tier1 样本（#191 #192），npm
 //   包无变更，保持 1.2.0。runtime/validation/truffle 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.44"
+// 1.0.45：控制注册表 1.3.0 翻转（ADR 0046 §11.4 ⑦，X4）与重放门面线程安全。locales：控制注册表 1.3.0，
+//   eu-ai-act-high-risk.requires.verifiedInputs → true（governed 仍为 false；#132，只改 Maven 制品与 controls，
+//   ui-messages npm 无变更，保持 1.0.30）。core：内置注册表副本逐字同步 1.3.0（#260）——声明
+//   eu-ai-act-high-risk 且 inputRefs 为 ["*"] 的规则从此报 E708（error 级），aster-api 对该档案的
+//   from-evidence 要求已签名事实，否则 DENY unverified_input。runtime：重放门面（时钟 / UUID / 随机数）
+//   实例方法加 synchronized，修复并发记录竞态（#77，truffle DelayedTaskTest.testConcurrentScheduling 间歇失败）。
+//   ts npm 1.6.0（ts#315 内置注册表副本 1.3.0；默认注册表变化会让既有源码出现新的 error 级诊断，故取 minor）
+//   由本次列车 ts:npm 层发布。core#245 不随本列车（另排）。validation/test/hi/truffle 源码无变更，lockstep
+//   重新打 tag；hi:npm 1.0.24、test:npm 1.2.0 无变更，幂等 skip。
+//
+version = "1.0.45"
 
 catalog {
     versionCatalog {
@@ -257,7 +267,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.44")
+        version("asterLang", "1.0.45")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
