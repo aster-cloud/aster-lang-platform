@@ -251,7 +251,19 @@ group = "cloud.aster-lang"
 //   由本次列车 ts:npm 层发布。core#245 不随本列车（另排）。validation/test/hi/truffle 源码无变更，lockstep
 //   重新打 tag；hi:npm 1.0.24、test:npm 1.2.0 无变更，幂等 skip。
 //
-version = "1.0.45"
+// 1.0.46：Core IR v2（ADR 0055，破坏性变更，不做 v1 兼容）。两引擎产出同一种 schemaVersion 2 的规范 IR。
+//   locales：v2 JSON Schema 与负例夹具（core-ir/，verifyCoreIrSchema 挂到 check），新增诊断码 E213
+//   EFFECT_PARAM_SHADOWS_BUILTIN 与 E900 PARSE_DUPLICATE_ANNOTATION_ARG 的码表与 zh / de 译文（#135）；
+//   syntax-diagnostics 新增 parseTimeBudget（E054 时间预算超时整句文案，#134，core#259）——两者都改了随
+//   ui-messages npm 分发的 syntax-diagnostics 目录，ui-messages npm 1.0.30 → 1.0.31 由本次列车 locales 层发布。
+//   core：CoreModel v2 形状、严格读方 CoreIrJson（版本预检 → schema → 严格绑定 → 不变式）、CanonicalJson
+//   规范输出、lowering 产出 v2、注解读方迁到 args、效应参数 <E>（E210 / E211 / E213）（#262）。truffle：
+//   严格读入 v2，删除 PatCtor.names 与首字母大写启发式，效应名小写（#173）。hi：E213 / E900 hi-IN 译文（#101，
+//   只改 Maven overlay，ui-messages-hi npm 无变更，保持 1.0.24）。ts npm 2.0.0（ts#317 产出 v2、serializeCoreIr /
+//   readCoreIr、删除 v1 序列化 API）与 test npm 2.0.0（test#199 删除 IR 归一化导出，门禁改为 schema 校验加
+//   逐字节比较）分别由本次列车 ts:npm、test:npm 层发布。runtime/validation 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.46"
 
 catalog {
     versionCatalog {
@@ -267,7 +279,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.45")
+        version("asterLang", "1.0.46")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
