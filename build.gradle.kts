@@ -263,7 +263,18 @@ group = "cloud.aster-lang"
 //   readCoreIr、删除 v1 序列化 API）与 test npm 2.0.0（test#199 删除 IR 归一化导出，门禁改为 schema 校验加
 //   逐字节比较）分别由本次列车 ts:npm、test:npm 层发布。runtime/validation 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.46"
+// 1.0.47：推断值统一（ADR 0056，破坏性变更）。两引擎对未写明的类型与能力产出相同的 IR，Core IR v2 值层豁免表清空
+//   （aster-lang-test#195–#198）。locales：推断命名规则表 type-inference/naming-rules.json 与 497 条共用测试向量
+//   （verifyTypeInferenceRules 挂到 check），删除三个语言包 overlay 的 typeInferenceRules（#137；未动 ui-messages /
+//   syntax-diagnostics / evaluation-diagnostics，ui-messages npm 保持 1.0.31）。core：工作流能力检查只看显式能力
+//   （V2）、推断返回类型统一为占位 Unknown（V1-ret、V4）（#265）；形参 / 字段推断改读 locales 命名规则表并按约束
+//   修正（V1-类型，#267）；Lambda.captures 只列外层局部（V3，#268）。truffle：captures 只列外层局部时全局名回落的
+//   加载测试（#177）。test：删除 V1–V4 豁免，新增 captures / 推断字段约束 / 工作流裸 io 能力 tier1 样本（#201–#203）
+//   ——npm 包只新增语料样本，test:npm 2.0.0 → 2.1.0。ts npm 3.0.0（ts#321–#323 同一组推断值变化，公开类型 Lexicon
+//   删除 typeInferenceRules，故取 major）由本次列车 ts:npm 层发布。runtime/validation/hi 源码无变更，lockstep
+//   重新打 tag；hi:npm 1.0.24 无变更，幂等 skip。
+//
+version = "1.0.47"
 
 catalog {
     versionCatalog {
@@ -279,7 +290,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.46")
+        version("asterLang", "1.0.47")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
