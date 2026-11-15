@@ -110,6 +110,8 @@ jobs:
           set -euo pipefail
           PLAN=release-plan.json
           fail=0
+          # pinOwner=train 的制品才会写这个文件；先建空文件，pinOwner 全为 human 时下面的读取不至于失败。
+          : > /tmp/pin-actions.txt
           # artifact → (repo, org) 映射从 plan 读。
           # ★org 缺省 aster-cloud；aster-api 于 2026-08 迁至 wontlost-ltd 并转私。
           #   此前这里把 org 硬编码成 aster-cloud，clone 得 403
@@ -160,7 +162,7 @@ jobs:
           MAIN_SHAS=$(python3 -c "import json;print(json.dumps(dict(l.split() for l in open('/tmp/main-shas.txt'))))")
           echo "main_shas=$MAIN_SHAS" >> "$GITHUB_OUTPUT"
           echo "preflight 验过的 main SHA：$MAIN_SHAS"
-          API_PIN_ACTION=$(sed -n 's/^aster-api:service=//p' /tmp/pin-actions.txt 2>/dev/null | head -1)
+          API_PIN_ACTION=$(sed -n 's/^aster-api:service=//p' /tmp/pin-actions.txt | head -1)
           echo "api_pin_action=${API_PIN_ACTION:-none}" >> "$GITHUB_OUTPUT"
           echo "api_pin_action=${API_PIN_ACTION:-none}"
           echo "preflight drift gate: all artifacts match release-plan ✅"
