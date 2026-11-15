@@ -7,6 +7,11 @@
 # 等 tag-push release run 完成 → 等制品 registry 可见 → 进下一层。失败即停（forward-only，
 # 已发布制品不回收）。dryRun 只打印计划不真发。
 #
+# ADR 0053 修订 A1：release-plan 里 pinOwner=train 的 service（aster-api）由列车在 L4 先 bump
+# platform pin（开 PR → 等必需检查 → 合并）再部署。所需 GitHub App 凭据（repo variable
+# TRAIN_PIN_APP_CLIENT_ID + secret TRAIN_PIN_APP_PRIVATE_KEY）见 docs/runbooks/train-pin-app.md。
+# App 令牌 1 小时过期，所以 train job 分两段跑：pin 层之前一段，签发令牌，再跑 pin 层起一段。
+#
 # 前置：secret CROSS_REPO_TOKEN（**fine-grained** PAT——实测 token 前缀 github_pat_、
 # 无 x-oauth-scopes 响应头；此处原注释误写为 classic，已更正。跨仓
 # workflow_dispatch + 轮询 runs + 读 GH Packages 可见性）。
@@ -51,6 +56,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       layers: ${{ steps.coalesce.outputs.layers }}
+      # ADR 0053 修订 A1：第一个含 pinOwner=train step 的层（无则为空）；pre_pin_to = 它的前一层。
+      pin_layer: ${{ steps.pinlayer.outputs.pin_layer }}
+      pre_pin_to: ${{ steps.pinlayer.outputs.pre_pin_to }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -64,6 +72,18 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
       - name: Print plan
         run: python3 scripts/release-plan/coalesce.py --plan release-plan.json
+      - name: Locate train-owned pin layer (ADR 0053 A1)
+        id: pinlayer
+        env:
+          LAYERS: ${{ steps.coalesce.outputs.layers }}
+        run: |
+          set -euo pipefail
+          L=$(jq -r '[to_entries[] | select(any(.value[]; (.pinOwner // "human") == "train")) | .key] | first // empty' <<<"$LAYERS")
+          PRE=""
+          [ -z "$L" ] || PRE=$((L-1))
+          echo "pin_layer=$L" >> "$GITHUB_OUTPUT"
+          echo "pre_pin_to=$PRE" >> "$GITHUB_OUTPUT"
+          echo "pin layer: ${L:-（无，pinOwner 全为 human）}"
 
   preflight:
     needs: plan
@@ -71,6 +91,8 @@ jobs:
     # stale gate（ADR 0053 §7）：drift gate 验过的各仓 main SHA，交给 train 在每次 dispatch 前比对。
     outputs:
       main_shas: ${{ steps.drift.outputs.main_shas }}
+      # ADR 0053 修订 A1：bump=列车 L4 负责 bump aster-api pin；skip=main 已是目标版本；none=pinOwner human。
+      api_pin_action: ${{ steps.drift.outputs.api_pin_action }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -127,7 +149,9 @@ jobs:
               CLONED[$REPO]=1
               echo "$REPO $(git -C "/tmp/$REPO" rev-parse HEAD)" >> /tmp/main-shas.txt
             fi
-            if ! python3 scripts/release-plan/check-artifact.py --plan "$PLAN" --artifact "$ID" --repo-root "/tmp/$REPO"; then
+            # --pin-action-file：pinOwner=train 的制品通过时写入「<id>=bump|skip」（ADR 0053 修订 A1 §3）。
+            if ! python3 scripts/release-plan/check-artifact.py --plan "$PLAN" --artifact "$ID" --repo-root "/tmp/$REPO" \
+                   --pin-action-file /tmp/pin-actions.txt; then
               fail=1
             fi
           done
@@ -136,7 +160,26 @@ jobs:
           MAIN_SHAS=$(python3 -c "import json;print(json.dumps(dict(l.split() for l in open('/tmp/main-shas.txt'))))")
           echo "main_shas=$MAIN_SHAS" >> "$GITHUB_OUTPUT"
           echo "preflight 验过的 main SHA：$MAIN_SHAS"
+          API_PIN_ACTION=$(sed -n 's/^aster-api:service=//p' /tmp/pin-actions.txt 2>/dev/null | head -1)
+          echo "api_pin_action=${API_PIN_ACTION:-none}" >> "$GITHUB_OUTPUT"
+          echo "api_pin_action=${API_PIN_ACTION:-none}"
           echo "preflight drift gate: all artifacts match release-plan ✅"
+
+      # ADR 0053 修订 A1 §7：api_pin_action=bump 时打印列车将在 L4 提交的 diff（只在本地 clone 里改，不推送）。
+      - name: Preview aster-api pin bump
+        if: ${{ steps.drift.outputs.api_pin_action != 'none' }}
+        env:
+          API_PIN_ACTION: ${{ steps.drift.outputs.api_pin_action }}
+        run: |
+          set -euo pipefail
+          { echo '### aster-api pin（ADR 0053 修订 A1）'; echo "api_pin_action: \`$API_PIN_ACTION\`"; } >> "$GITHUB_STEP_SUMMARY"
+          [ "$API_PIN_ACTION" = "bump" ] || exit 0
+          TARGET=$(jq -r '.platformVersion' release-plan.json)
+          python3 scripts/release-plan/bump-api-pin.py --repo-root /tmp/aster-api --write "$TARGET"
+          DIFF=$(git -C /tmp/aster-api --no-pager diff)
+          git -C /tmp/aster-api checkout -- .
+          echo "$DIFF"
+          { echo '```diff'; echo "$DIFF"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   train:
     needs: [plan, preflight]
@@ -149,6 +192,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
+      # 第一段：pin 层之前的各层（无 pinOwner=train 时就是整趟列车）。
       - name: Run release train
         env:
           # 跨仓 dispatch/轮询用 CROSS_REPO_TOKEN（需 Actions+Contents 写）。owner=aster-cloud。
@@ -163,10 +207,68 @@ jobs:
           LAYERS: ${{ needs.plan.outputs.layers }}
           DRY_RUN: ${{ inputs.dryRun }}
           FROM_LAYER: ${{ inputs.fromLayer }}
+          TO_LAYER: ${{ needs.plan.outputs.pre_pin_to }}
           TRAIN_ID: ${{ inputs.trainId || github.run_id }}
           MAIN_SHAS: ${{ needs.preflight.outputs.main_shas }}
           TRAIN_MANIFEST: ${{ runner.temp }}/train-manifest.json
         run: bash scripts/release-plan/run-train.sh
+
+      # ADR 0053 修订 A1 §6：aster-api pin 由专用 GitHub App 推分支 / 开 PR / 合并（不需要规则集 bypass）。
+      # 缺凭据 fail-closed，并指明要配什么（不静默回退到 PAT）。签发时刻交给 run-train.sh：
+      # 安装令牌 1 小时过期，脚本在过期前 5 分钟停止写操作并提示 fromLayer 续跑。
+      - name: Require train-pin App credentials
+        id: pinreq
+        if: ${{ needs.plan.outputs.pin_layer != '' }}
+        env:
+          CLIENT_ID: ${{ vars.TRAIN_PIN_APP_CLIENT_ID }}
+          HAS_KEY: ${{ secrets.TRAIN_PIN_APP_PRIVATE_KEY != '' }}
+        run: |
+          missing=""
+          [ -n "$CLIENT_ID" ] || missing="repo variable TRAIN_PIN_APP_CLIENT_ID"
+          [ "$HAS_KEY" = "true" ] || missing="${missing:+$missing 与 }secret TRAIN_PIN_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::release-plan 中 aster-api:service 为 pinOwner=train，但本仓缺少 $missing（GitHub App aster-train-pin，见 docs/runbooks/train-pin-app.md）。配置好再开车，或把 pinOwner 改回 human。"
+            exit 1
+          fi
+          echo "issued_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      # dry-run 只申请读权限（contents/pull-requests/checks: read）；真发才申请写，并加 actions: write 用于超时重跑一次。
+      # 空字符串的 permission-* 不会被申请（create-github-app-token 跳过空值）。
+      - name: Mint aster-api pin token
+        id: pintoken
+        if: ${{ needs.plan.outputs.pin_layer != '' }}
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.TRAIN_PIN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRAIN_PIN_APP_PRIVATE_KEY }}
+          owner: wontlost-ltd
+          repositories: aster-api
+          permission-contents: ${{ inputs.dryRun && 'read' || 'write' }}
+          permission-pull-requests: ${{ inputs.dryRun && 'read' || 'write' }}
+          permission-checks: read
+          permission-actions: ${{ !inputs.dryRun && 'write' || '' }}
+
+      # 第二段：pin 层起的各层（含与 pin 同层的其它 step，如 ts:npm）。清单在第一段基础上续写。
+      - name: Run release train (pin layer onward)
+        if: ${{ needs.plan.outputs.pin_layer != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          WONTLOST_TOKEN: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
+          VIS_TOKEN: ${{ github.token }}
+          LAYERS: ${{ needs.plan.outputs.layers }}
+          DRY_RUN: ${{ inputs.dryRun }}
+          INPUT_FROM_LAYER: ${{ inputs.fromLayer }}
+          PIN_LAYER: ${{ needs.plan.outputs.pin_layer }}
+          TRAIN_ID: ${{ inputs.trainId || github.run_id }}
+          MAIN_SHAS: ${{ needs.preflight.outputs.main_shas }}
+          TRAIN_MANIFEST: ${{ runner.temp }}/train-manifest.json
+          PIN_TOKEN: ${{ steps.pintoken.outputs.token }}
+          PIN_TOKEN_ISSUED_AT: ${{ steps.pinreq.outputs.issued_at }}
+          PIN_APP_SLUG: ${{ steps.pintoken.outputs.app-slug }}
+          TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          FROM_LAYER=$(( INPUT_FROM_LAYER > PIN_LAYER ? INPUT_FROM_LAYER : PIN_LAYER )) \
+            bash scripts/release-plan/run-train.sh
 
       # 列车清单（ADR 0053 §3/§8）：每个 step 的 repo/tag/commit/run。失败也上传（定位停在哪一层）。
       # 写进 job summary 一份（永久可查），制品本身由 cleanup job 删除，retention 7 天兜底。
@@ -194,6 +296,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # ADR 0053 修订 A1 §4：pin 合并后跟随的 push deploy run 标题不带 train <id>，按清单里的 run ID 补清。
+      - name: Download train manifest
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: train-${{ inputs.trainId || github.run_id }}-manifest
+          path: ${{ runner.temp }}/manifest
       - name: Clean train artifacts and tag-ref caches
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
@@ -205,4 +314,5 @@ jobs:
           DRY_RUN: ${{ inputs.dryRun }}
           # 列车失败时保留 service deploy 的中间制品（续跑复用源），其余照删。
           KEEP_RESUME: ${{ needs.train.result != 'success' }}
+          TRAIN_MANIFEST: ${{ runner.temp }}/manifest/train-manifest.json
         run: bash scripts/release-plan/cleanup-train.sh

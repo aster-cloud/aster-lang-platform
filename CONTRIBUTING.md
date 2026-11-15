@@ -23,6 +23,9 @@ cat build/version-catalog/libs.versions.toml
 
 # 3. 发布列车执行器的回归测试（仅当改了 scripts/release-plan/）
 bash scripts/release-plan/run-train.test.sh
+bash scripts/release-plan/train-reuse.test.sh
+bash scripts/release-plan/check-artifact.test.sh
+bash scripts/release-plan/train-api-pin.test.sh
 ```
 
 改动**必须**在本地跑通以上检查后再提 PR。改了 catalog 内容（`asterLang` 或任何

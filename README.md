@@ -136,6 +136,10 @@ CI 的 drift gate（`.github/workflows/ci.yml`）断言 `build.gradle.kts` 的 `
 5. 各消费仓把 `settings.gradle.kts` 的 `from("cloud.aster-lang:aster-lang-platform:X.Y.Z")`
    指向新版（Renovate pin PR 或手工，每 repo 一行）。列车 preflight 会 checkout 每个
    仓的 `main` 跑 `check-artifact.py`，任一仓 pin 未更新即拒绝发车。
+   例外：`aster-api:service` 设了 `"pinOwner": "train"` 时（ADR 0053 修订 A1），aster-api
+   的 pin 可以停在一个已发布的旧版本，列车在 L4 自己开 `train/aster-api-pin-X` PR、等必需
+   检查绿后合并，再跟随该合并的 push deploy。需要专用 GitHub App，配置见
+   [docs/runbooks/train-pin-app.md](docs/runbooks/train-pin-app.md)；缺省 `human` 时维持上面的手工流程。
 6. 在本仓 Actions 手动运行 **Release Train**（`release-train.yml`）：先 `dryRun=true`
    看计划与 preflight，再 `dryRun=false` 真发。列车按 `releaseOrder` 逐层发布：
    platform → {core, runtime, validation, test} → {locales, hi} → truffle → {ts, aster-api}；
