@@ -40,6 +40,13 @@ jobs:
       - name: train artifact-reuse regression test
         run: bash scripts/release-plan/train-reuse.test.sh
 
+      # ADR 0053 修订 A1：drift gate 的 pinOwner=train 语义（表驱动）与列车阶段 P/D（开 PR、复用、
+      # 超时重跑一次、strict 拒绝合并、跟随 push deploy、dry-run 只读、续跑幂等）的回归测试。
+      - name: check-artifact pinOwner regression test
+        run: bash scripts/release-plan/check-artifact.test.sh
+      - name: train aster-api pin regression test
+        run: bash scripts/release-plan/train-api-pin.test.sh
+
       # workflow 静态检查（review L12），钉死版本。
       - name: actionlint
         run: |

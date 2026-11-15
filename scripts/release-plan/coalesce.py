@@ -60,6 +60,10 @@ def main() -> int:
                 "workflow": workflow,
                 "version": primary["expectedVersion"],
                 "tagPrefix": primary.get("tagPrefix", DEFAULT_TAG_PREFIX),
+                # ADR 0053 修订 A1：pinOwner=train 时 run-train.sh 在本 step 先 bump 该仓的
+                # platform pin（阶段 P）再部署（阶段 D）；pinVersion 是要 bump 到的目标版本。
+                "pinOwner": primary.get("pinOwner", "human"),
+                "pinVersion": primary.get("expectedPlatformPin"),
                 "artifactIds": [a["id"] for a in arts],
                 "kinds": [a["kind"] for a in arts],
                 # 组内每个 artifact 的完整可见性判定信息——orchestrator 必须确认

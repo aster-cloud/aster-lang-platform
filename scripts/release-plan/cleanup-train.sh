@@ -7,6 +7,8 @@
 #      被后续 main/PR 构建命中，纯占 10GB 配额并挤掉 main 上有用的缓存。
 #   2. 本列车触发的 service deploy run 的 workflow 制品（如 aster-api 的 quarkus-app-<key>）：
 #      按 run 标题「… train <id>」精确识别，不碰手工或 push 触发的 run。
+#      另按列车清单（TRAIN_MANIFEST）里该仓 step 记录的 run ID 补清：ADR 0053 修订 A1 下，
+#      列车合并 pin PR 后跟随的是 push deploy run，其标题是 commit message，不带 train <id>。
 #      镜像已按 digest 推送并签名，复用走镜像（ADR 0053 §5），这些中间制品已无用。
 #   3. 列车自身 run 的 train-<id>-* 制品（manifest 等）。
 #
@@ -18,6 +20,7 @@
 #   LAYERS        coalesce.py 输出（决定哪些 repo/tag）
 #   TRAIN_ID      列车标识
 #   TRAIN_RUN_ID  列车自身的 run id（可空：手工清理时不删列车自身制品）
+#   TRAIN_MANIFEST 列车清单路径（可空/不存在：只按标题识别）
 #   PLATFORM_REPO 列车所在仓 owner/name（缺省 aster-cloud/aster-lang-platform）
 #   DRY_RUN       true=只列不删（手工 workflow 缺省 true）
 #   KEEP_RESUME   true=保留第 2 类（service deploy 的中间制品）。列车失败时由 workflow 置 true：
@@ -31,6 +34,7 @@ TRAIN_RUN_ID="${TRAIN_RUN_ID:-}"
 WONTLOST_TOKEN="${WONTLOST_TOKEN:-}"
 ASTER_CLOUD_TOKEN="$GH_TOKEN"
 KEEP_RESUME="${KEEP_RESUME:-false}"
+TRAIN_MANIFEST="${TRAIN_MANIFEST:-}"
 DELETED=0; FAILED=0
 
 log()  { echo "[cleanup] $*" >&2; }
@@ -79,6 +83,10 @@ while IFS=$'\t' read -r repo org workflow tag kinds; do
     log "$org/$repo: 本列车 $workflow run 的制品"
     runs=$(gh api --method GET "repos/$org/$repo/actions/workflows/$workflow/runs" -f event=workflow_dispatch -f per_page=100 \
              -q ".workflow_runs[] | select((.display_title // \"\") | endswith(\"train $TRAIN_ID\")) | .id" 2>/dev/null || true)
+    if [ -n "$TRAIN_MANIFEST" ] && [ -s "$TRAIN_MANIFEST" ]; then
+      runs="$runs $(jq -r --arg r "$repo" '.steps[]? | select(.repo == $r and .run != null) | .run' "$TRAIN_MANIFEST" 2>/dev/null || true)"
+    fi
+    runs=$(tr ' ' '\n' <<<"$runs" | sed '/^$/d' | sort -u)
     for run in $runs; do
       arts=$(gh api "repos/$org/$repo/actions/runs/$run/artifacts" -q '.artifacts[] | "\(.id)\t\(.name)"' 2>/dev/null || true)
       while IFS=$'\t' read -r aid aname; do

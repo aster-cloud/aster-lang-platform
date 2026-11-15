@@ -18,12 +18,28 @@
                     （源文件不含 literal version 行）②expectedPlatformPin == plan.platformVersion
   none            : 无版本制品（service），只校 expectedPlatformPin
 另对所有 expectedPlatformPin 非 null 的 artifact 校验 settings 的 platform pin。
+
+pinOwner（ADR 0053 修订 A1 §3，缺省 human）：
+  human : pin 必须 == plan.platformVersion（现行断言，人先合 pin PR 再开车）
+  train : 列车在 L4 负责 bump（只用于 service 制品，即 aster-api）。pin 允许
+          ① == platformVersion（已 bump，阶段 P 跳过）
+          ② 严格小于 platformVersion 且 aster-lang-platform 上存在 v<pin> tag（阶段 P bump）
+          其余（更高、tag 不存在、无法解析）判漂移；tag 查询失败 fail-closed。
+          无论哪种取值，settings 与 setup-aster-build 的 sibling-ref 默认值必须一致（#337）。
+          通过时把 `<artifact>=bump|skip` 追加到 --pin-action-file（preflight 输出 api_pin_action）。
 """
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
+
+# aster-api 的第二处 platform 版本源（verify-sibling-ref-pin.sh 的另一侧）。
+SIBLING_REF_ACTION = ".github/actions/setup-aster-build/action.yml"
+DEFAULT_PLATFORM_REMOTE = "https://github.com/aster-cloud/aster-lang-platform"
+SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+PIN_OWNERS = ("human", "train")
 
 
 def err(msg: str) -> None:
@@ -80,6 +96,70 @@ def settings_platform_pin(repo_root: Path, artifact_path: str | None = None) -> 
     return _settings_pin_at(repo_root)
 
 
+def sibling_ref_pin(repo_root: Path) -> str | None:
+    """setup-aster-build 的 sibling-ref 默认值（去掉前缀 v）。与 verify-sibling-ref-pin.sh 同一解析：
+    只取 sibling-ref 段内的 default，避免撞上其它输入的 default。"""
+    text = read_text(repo_root / SIBLING_REF_ACTION)
+    blk = re.search(r'^  sibling-ref:\s*$(.*?)(?=^  \S|\Z)', text, re.S | re.M)
+    if not blk:
+        return None
+    d = re.search(r'default:\s*"v?(\d+\.\d+\.\d+)"', blk.group(1))
+    return d.group(1) if d else None
+
+
+def parse_semver(v: str | None) -> tuple[int, int, int] | None:
+    """完整匹配 X.Y.Z（不接受前缀 v、预发布后缀、构建元数据），按整数三元组返回。"""
+    m = SEMVER.match(v or "")
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def platform_tag_state(remote: str, version: str) -> str:
+    """aster-lang-platform 上 v<version> 是否存在：exists / missing / error:<原因>。
+    git ls-remote --exit-code：0=存在，2=不存在，其它非零=查询失败（网络、鉴权）。"""
+    try:
+        r = subprocess.run(["git", "ls-remote", "--exit-code", remote, f"refs/tags/v{version}"],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"error:{e}"
+    if r.returncode == 0:
+        return "exists"
+    if r.returncode == 2:
+        return "missing"
+    # 注解只认单行：把 git 的多行报错压成一行。
+    return f"error:exit {r.returncode}: {' | '.join(l for l in r.stderr.splitlines() if l.strip())[:300]}"
+
+
+def check_train_pin(repo_root: Path, actual: str | None, target: str, remote: str) -> tuple[list[str], str | None]:
+    """pinOwner=train 的放宽断言。返回 (failures, action)，action ∈ {bump, skip}，失败时为 None。"""
+    failures: list[str] = []
+    sibling = sibling_ref_pin(repo_root)
+    if sibling is None:
+        failures.append(f"未能从 {SIBLING_REF_ACTION} 解析出 sibling-ref 默认值（形如 \"vX.Y.Z\"）")
+    elif actual != sibling:
+        failures.append(f"settings.gradle platform pin {actual!r} 与 sibling-ref 默认值 v{sibling} 不一致"
+                        "（半改状态，两处必须同时 bump，见 verify-sibling-ref-pin.sh）")
+    tgt, cur = parse_semver(target), parse_semver(actual)
+    if tgt is None:
+        failures.append(f"plan.platformVersion {target!r} 无法解析为 X.Y.Z")
+    if cur is None:
+        failures.append(f"platform pin {actual!r} 无法解析为 X.Y.Z")
+    if failures:
+        return failures, None
+    if cur == tgt:
+        return [], "skip"
+    if cur > tgt:
+        return [f"platform pin {actual} 高于目标 {target}（pinOwner=train 只允许 == 目标或已发布的旧版本）"], None
+    state = platform_tag_state(remote, actual)
+    if state == "missing":
+        return [f"platform pin {actual} 低于目标 {target}，但 aster-lang-platform 上 tag v{actual} 不存在"
+                "（不是发布过的版本）"], None
+    if state != "exists":
+        return [f"aster-lang-platform tag v{actual} 查询失败（fail-closed：网络或鉴权错误，无法判定 tag 是否发布过）："
+                f"{state[len('error:'):]}"], None
+    print(f"[pin bump] settings.gradle {actual} → {target}；sibling-ref v{actual} → v{target}")
+    return [], "bump"
+
+
 def build_file_for(repo_root: Path, artifact_path: str | None) -> Path:
     base = repo_root / artifact_path if artifact_path else repo_root
     return base / "build.gradle.kts"
@@ -90,6 +170,10 @@ def main() -> int:
     ap.add_argument("--plan", required=True)
     ap.add_argument("--artifact", required=True)
     ap.add_argument("--repo-root", required=True)
+    ap.add_argument("--platform-remote", default=DEFAULT_PLATFORM_REMOTE,
+                    help="pinOwner=train 校验 v<pin> tag 的 aster-lang-platform 远端（测试用本地仓）")
+    ap.add_argument("--pin-action-file",
+                    help="pinOwner=train 通过时追加 `<artifact>=bump|skip` 的文件（preflight 输出 api_pin_action）")
     args = ap.parse_args()
 
     plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
@@ -133,9 +217,18 @@ def main() -> int:
 
     # platform pin 校验（凡 expectedPlatformPin 非 null）
     exp_pin = art.get("expectedPlatformPin")
-    if exp_pin is not None:
+    pin_owner = art.get("pinOwner", "human")
+    pin_action = None
+    if pin_owner not in PIN_OWNERS:
+        failures.append(f"未知 pinOwner: {pin_owner!r}（只允许 {'/'.join(PIN_OWNERS)}）")
+    elif pin_owner == "train" and (art["kind"] != "service" or exp_pin is None):
+        failures.append("pinOwner=train 只适用于有 expectedPlatformPin 的 service 制品（列车只会 bump aster-api）")
+    elif exp_pin is not None:
         actual_pin = settings_platform_pin(repo_root, artifact_path)
-        if actual_pin != exp_pin:
+        if pin_owner == "train":
+            train_failures, pin_action = check_train_pin(repo_root, actual_pin, plat_ver, args.platform_remote)
+            failures.extend(train_failures)
+        elif actual_pin != exp_pin:
             failures.append(f"platform pin {actual_pin!r} != expected {exp_pin!r}（应 == plan.platformVersion {plat_ver!r}）")
         if exp_pin != plat_ver:
             failures.append(f"plan 自相矛盾：artifact.expectedPlatformPin {exp_pin!r} != plan.platformVersion {plat_ver!r}")
@@ -144,7 +237,11 @@ def main() -> int:
         for f in failures:
             err(f"[{args.artifact}] {f}")
         return 1
-    print(f"[{args.artifact}] OK (versionSource={vs}, expected={expected}, pin={exp_pin})")
+    if pin_action and args.pin_action_file:
+        with open(args.pin_action_file, "a", encoding="utf-8") as f:
+            f.write(f"{args.artifact}={pin_action}\n")
+    print(f"[{args.artifact}] OK (versionSource={vs}, expected={expected}, pin={exp_pin}"
+          f"{f', pinOwner={pin_owner}, api_pin_action={pin_action}' if pin_action else ''})")
     return 0
 
 
