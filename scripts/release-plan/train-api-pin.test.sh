@@ -258,8 +258,8 @@ grep -q "gh pr merge 42 .*--match-head-commit $head" "$CALLS" || fail "reuse：�
 # 在假远端里真实造出这样一个 head（同 tree、parent 是另一个 commit），fixture 如实报告它，
 # 不能只在 fixture 里谎报 parent：那样重建出的 commit 与原 head 逐字节相同，SHA 也相同。
 R="$GIT_BASE/wontlost-ltd/aster-api.git"
-oldbase=$(git -C "$R" commit-tree "$(git -C "$R" rev-parse "$BASE^{tree}")" -m 'older main')
-oldhead=$(git -C "$R" commit-tree "$tree" -p "$oldbase" -m "chore(release): 生态 pin bump 1.0.47 → 1.0.48（train T1）")
+oldbase=$(git -C "$R" -c user.name=t -c user.email=t@t commit-tree "$(git -C "$R" rev-parse "$BASE^{tree}")" -m 'older main')
+oldhead=$(git -C "$R" -c user.name=t -c user.email=t@t commit-tree "$tree" -p "$oldbase" -m "chore(release): 生态 pin bump 1.0.47 → 1.0.48（train T1）")
 git -C "$R" update-ref refs/heads/train/aster-api-pin-1.0.48 "$oldhead"
 fx "$API/pulls" "[{\"number\":42,\"head\":{\"ref\":\"train/aster-api-pin-1.0.48\",\"sha\":\"$oldhead\"}}]"
 fx "$API/git/commits/$oldhead" "{\"sha\":\"$oldhead\",\"tree\":{\"sha\":\"$tree\"},\"parents\":[{\"sha\":\"$oldbase\"}]}"
