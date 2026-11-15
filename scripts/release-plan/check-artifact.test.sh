@@ -134,17 +134,22 @@ check
 grep -q "^::error::.*pinOwner=train" "$TMP/err" || fail "非 service 的 pinOwner=train 应报错"
 echo "PASS: 非法 pinOwner / 非 service 制品的 pinOwner=train 被拒"
 
-# ── 5. 仓里的 release-plan.json 本身仍能通过 coalesce（字段带出）─────────────────
-STEPS="$(python3 "$HERE/coalesce.py" --plan "$HERE/../../release-plan.json")"
-python3 - "$STEPS" "$HERE/../../release-plan.json" <<'PY'
+# ── 5. coalesce 带出 pinOwner（缺省 human）与 pinVersion：用 fixture plan，不依赖仓里 plan 的取值 ─────
+for owner in train human ""; do
+  mkcase 1.0.48 1.0.47 1.0.47 "$owner"
+  python3 - "$TMP/plan.json" <<'PY2'
 import json, sys
-steps = [s for layer in json.loads(sys.argv[1]) for s in layer]
-plan = json.load(open(sys.argv[2]))
-art = next(a for a in plan["artifacts"] if a["id"] == "aster-api:service")
-api = next(s for s in steps if s["repo"] == "aster-api")
-assert api["pinOwner"] == art.get("pinOwner", "human"), api
-assert api["pinVersion"] == art["expectedPlatformPin"], api
-core = next(s for s in steps if s["repo"] == "aster-lang-core")
-assert core["pinOwner"] == "human", core
-PY
-echo "PASS: coalesce 带出 pinOwner（缺省 human）与 pinVersion"
+p = sys.argv[1]; d = json.load(open(p))
+d["artifacts"].append({"id": "core:maven", "repo": "aster-lang-core", "kind": "maven",
+    "versionSource": "catalog-derived", "expectedVersion": "1.0.48", "expectedPlatformPin": "1.0.48",
+    "releaseWorkflow": "release.yml", "mavenPackages": ["cloud.aster-lang.aster-lang-core"]})
+d["releaseOrder"] = [["core:maven"], ["aster-api:service"]]
+json.dump(d, open(p, "w"))
+PY2
+  STEPS="$(python3 "$HERE/coalesce.py" --plan "$TMP/plan.json")"
+  want="${owner:-human}"
+  [ "$(jq -r '.[1][0].pinOwner' <<<"$STEPS")" = "$want" ] || fail "coalesce(pinOwner=${owner:-缺省})：aster-api 的 pinOwner 应为 $want"
+  [ "$(jq -r '.[1][0].pinVersion' <<<"$STEPS")" = "1.0.48" ] || fail "coalesce：aster-api 的 pinVersion 应为 expectedPlatformPin"
+  [ "$(jq -r '.[0][0].pinOwner' <<<"$STEPS")" = "human" ] || fail "coalesce：未声明 pinOwner 的制品应缺省 human"
+done
+echo "PASS: coalesce 带出 pinOwner（train / human / 缺省 human）与 pinVersion（fixture plan）"

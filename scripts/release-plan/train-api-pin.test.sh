@@ -17,6 +17,9 @@ RUN="$HERE/run-train.sh"
 CLEAN="$HERE/cleanup-train.sh"
 command -v jq >/dev/null || { echo "::error::jq not found"; exit 1; }
 
+# 固定 git 时间戳：commit SHA 只取决于内容，用例结果不随「两次提交是否落在同一秒」变化
+# （快 runner 上曾因此误判，见 platform#124 的 CI）。
+export GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z'
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
@@ -251,12 +254,23 @@ DRY_RUN=false POLL_MAX=1 SERVICE_POLL_MAX=2 SERVICE_FALLBACK_AFTER=2 run_train
 grep -q 'POST' "$CALLS" && fail "reuse：不应再开 PR"
 [ "$(remote_branch train/aster-api-pin-1.0.48)" = "$head" ] || fail "reuse：head 一致时不得 force-push"
 grep -q "gh pr merge 42 .*--match-head-commit $head" "$CALLS" || fail "reuse：应合并原 head"
-# 内容（tree）一致但 base 不是 preflight SHA → 也要在 preflight SHA 上重建并 force-push
-fx "$API/git/commits/$head" "{\"sha\":\"$head\",\"tree\":{\"sha\":\"$tree\"},\"parents\":[{\"sha\":\"0ldbase\"}]}"
+# 内容（tree）一致但 base 不是 preflight SHA → 也要在 preflight SHA 上重建并 force-push。
+# 在假远端里真实造出这样一个 head（同 tree、parent 是另一个 commit），fixture 如实报告它，
+# 不能只在 fixture 里谎报 parent：那样重建出的 commit 与原 head 逐字节相同，SHA 也相同。
+R="$GIT_BASE/wontlost-ltd/aster-api.git"
+oldbase=$(git -C "$R" -c user.name=t -c user.email=t@t commit-tree "$(git -C "$R" rev-parse "$BASE^{tree}")" -m 'older main')
+oldhead=$(git -C "$R" -c user.name=t -c user.email=t@t commit-tree "$tree" -p "$oldbase" -m "chore(release): 生态 pin bump 1.0.47 → 1.0.48（train T1）")
+git -C "$R" update-ref refs/heads/train/aster-api-pin-1.0.48 "$oldhead"
+fx "$API/pulls" "[{\"number\":42,\"head\":{\"ref\":\"train/aster-api-pin-1.0.48\",\"sha\":\"$oldhead\"}}]"
+fx "$API/git/commits/$oldhead" "{\"sha\":\"$oldhead\",\"tree\":{\"sha\":\"$tree\"},\"parents\":[{\"sha\":\"$oldbase\"}]}"
 : >"$CALLS"; : >"$FIX/.states"
 DRY_RUN=false POLL_MAX=1 SERVICE_POLL_MAX=2 SERVICE_FALLBACK_AFTER=2 run_train
 [ "$rc" -eq 0 ] || fail "reuse(旧 base)：rc=$rc"
-[ "$(remote_branch train/aster-api-pin-1.0.48)" != "$head" ] || fail "reuse(旧 base)：base 不是 preflight SHA 时应 force-push"
+new=$(remote_branch train/aster-api-pin-1.0.48)
+[ "$new" != "$oldhead" ] || fail "reuse(旧 base)：base 不是 preflight SHA 时应 force-push"
+[ "$(git -C "$R" rev-parse "$new^")" = "$BASE" ] || fail "reuse(旧 base)：重建的 commit 的 parent 必须是 preflight SHA"
+[ "$(git -C "$R" rev-parse "$new^{tree}")" = "$tree" ] || fail "reuse(旧 base)：重建的 commit 内容应与原 head 相同"
+grep -q "gh pr merge 42 .*--match-head-commit $new" "$CALLS" || fail "reuse(旧 base)：应合并重建后的 head"
 # head 内容不一致（例如 base 已不是 preflight SHA）→ force-push 新 commit
 newcase reuse-stale-head
 mkremote 1.0.47 1.0.47
