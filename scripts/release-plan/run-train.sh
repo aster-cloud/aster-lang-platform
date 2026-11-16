@@ -73,8 +73,10 @@ PIN_APP_SLUG="${PIN_APP_SLUG:-aster-train-pin}"
 # aster-api 规则集 main-protect（id 22982832）的两个必需检查，只认 GitHub Actions（integration 15368）。
 PIN_REQUIRED_CHECKS=("ci-result" "Guard bypass suite (#466)")
 ACTIONS_APP_ID=15368
-# 「可证实超时」只看托管构建：本地 runner 失败会回落到托管，托管才是 40 分钟上限的那一条。
-PIN_HOSTED_BUILD_CHECK="build-hosted / build"
+# 「可证实超时」只看托管构建：本地 runner 失败会回落到托管，托管才是有超时上限的那一条。
+# 按前缀匹配托管路径下的任一 job：ci-build.yml 拆分前只有 `build-hosted / build`，拆成并行 job 后
+# 为 `build-hosted / {checks,guard-bypass,unit,integration,verify}`（ADR 0053 修订 A2 §8）。
+PIN_HOSTED_BUILD_PREFIX="build-hosted / "
 PIN_TIMEOUT_TEXT="has exceeded the maximum execution time"
 # pin 改动必须恰好是这两个文件（sort 后的顺序）。
 PIN_FILES=$'.github/actions/setup-aster-build/action.yml\nsettings.gradle'
@@ -395,23 +397,26 @@ pin_checks_state() {  # repo head seen-ids
 # 判定超时：托管构建的 check-run conclusion == timed_out，或其注解含 runner 的固定超时文案。
 # 次数记在 GitHub 自己的 run_attempt 里：只有 run_attempt == 1 才重跑，续跑多少次都只重跑一次。
 pin_maybe_rerun() {  # repo pr head
-  local repo="$1" pr="$2" json line id concl url msgs run attempt proven=""
+  local repo="$1" pr="$2" json rows id concl url msgs run attempt proven="" seen=""
   local pr_url="https://github.com/$REPO_ORG/$repo/pull/$pr"
   json=$(pin_gh api "repos/$REPO_ORG/$repo/commits/$3/check-runs?per_page=100" 2>/dev/null) || {
     err "PR #$pr 必需检查失败；查询 check-run 失败，无法证实超时 → 不自动重跑，停车。PR 留给人看：$pr_url"; return 1; }
-  line=$(jq -r --arg n "$PIN_HOSTED_BUILD_CHECK" --argjson app "$ACTIONS_APP_ID" \
-    '[.check_runs[]? | select(.name==$n and .app.id==$app)] | sort_by(.id) | last
-     | if . == null then "" else "\(.id) \(.conclusion) \(.details_url)" end' <<<"$json")
-  read -r id concl url <<<"$line"
-  if [ "$concl" = "timed_out" ]; then
-    proven=1
-  elif [ -n "$id" ]; then
+  # 托管路径下未成功的 job，timed_out 排在前面；逐个找超时证据，第一个被证实的即为重跑对象。
+  rows=$(jq -r --arg p "$PIN_HOSTED_BUILD_PREFIX" --argjson app "$ACTIONS_APP_ID" '
+    [.check_runs[]? | select((.name | startswith($p)) and .app.id == $app and .status == "completed"
+                             and .conclusion != "success" and .conclusion != "skipped")]
+    | sort_by(if .conclusion == "timed_out" then 0 else 1 end, -.id)
+    | .[] | "\(.id) \(.conclusion) \(.details_url)"' <<<"$json")
+  while read -r id concl url; do
+    [ -n "$id" ] || continue
+    seen="$seen ${concl}"
+    if [ "$concl" = "timed_out" ]; then proven=1; break; fi
     msgs=$(pin_gh api "repos/$REPO_ORG/$repo/check-runs/$id/annotations?per_page=100" -q '.[].message' 2>/dev/null) || {
-      err "PR #$pr 必需检查失败；查询 $PIN_HOSTED_BUILD_CHECK 的注解失败，无法证实超时 → 不自动重跑，停车。PR：$pr_url"; return 1; }
-    grep -qF "$PIN_TIMEOUT_TEXT" <<<"$msgs" && proven=1
-  fi
+      err "PR #$pr 必需检查失败；查询托管 job（check-run ${id}）的注解失败，无法证实超时 → 不自动重跑，停车。PR：$pr_url"; return 1; }
+    if grep -qF "$PIN_TIMEOUT_TEXT" <<<"$msgs"; then proven=1; break; fi
+  done <<<"$rows"
   if [ -z "$proven" ]; then
-    err "PR #$pr 必需检查失败，且不是可证实的超时（$PIN_HOSTED_BUILD_CHECK conclusion=${concl:-无}）→ 不自动重跑，停车。PR 留给人看：$pr_url"
+    err "PR #$pr 必需检查失败，且不是可证实的超时（${PIN_HOSTED_BUILD_PREFIX}* 未成功的 job：${seen:- 无}）→ 不自动重跑，停车。PR 留给人看：$pr_url"
     return 1
   fi
   run=$(sed -n 's#.*/actions/runs/\([0-9][0-9]*\)/job.*#\1#p' <<<"$url")
@@ -424,7 +429,7 @@ pin_maybe_rerun() {  # repo pr head
   fi
   pin_token_alive || { pin_token_expiring "重跑 CI"; return 1; }
   pin_gh run rerun "$run" --failed --repo "$REPO_ORG/$repo" >&2 || { err "重跑 CI run $run 失败 → 停车。PR：$pr_url"; return 1; }
-  log "  [pin] CI run $run 可证实超时（${PIN_HOSTED_BUILD_CHECK}）→ 已自动重跑失败 job（仅此一次）"
+  log "  [pin] CI run $run 可证实超时（check-run ${id}）→ 已自动重跑失败 job（仅此一次）"
 }
 
 # 等 PR head 上两个必需检查全绿。上限 PIN_CI_POLL_MAX 轮，且不超过 App 令牌的安全期。
