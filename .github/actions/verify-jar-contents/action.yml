@@ -12,7 +12,7 @@ inputs:
     required: false
     default: '\.class$'
   version:
-    description: 主 jar 文件名必须以 -<version>.jar 结尾；空则不查
+    description: 主 jar 文件名必须以 -<version>.jar 结尾（可直接传 vX 形式的 tag，开头的 v 会去掉）；空则不查
     required: false
     default: ''
   working-directory:

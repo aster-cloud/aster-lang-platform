@@ -30,16 +30,28 @@ MAIN_SHAS="${MAIN_SHAS:-}"
 [ -n "$MAIN_SHAS" ] || MAIN_SHAS='{}'
 
 echo '### main CI 门禁（ADR 0053 修订 A2）' >>"$SUMMARY"
-if [ "${FORCE_TESTS:-false}" = "true" ]; then
-  echo "::warning::forceTests=true：preflight 不查 main CI，各仓发布 run 将跑完整测试"
-  echo '- ⚠️ forceTests=true：跳过，各仓发布 run 跑完整测试' >>"$SUMMARY"
-  exit 0
-fi
 
 # 有发布 step 的仓（service 没有发布 run，aster-api 由 L4 pin PR 的必需检查与 deploy 把关）。
 ROWS=$(jq -r '[.[][] | select((.kinds // []) | any(. == "service") | not)
               | "\(.org // "aster-cloud") \(.repo)"] | unique | .[]' <<<"$LAYERS") \
   || { echo "::error::LAYERS 不是合法 JSON（fail-closed）"; exit 1; }
+
+# forceTests：不查 main CI，但要求每个参与仓都已接入（有门禁配置 = 其 release workflow 认 forceTests 输入）。
+# 未接入的仓收到 -f forceTests=true 会拒绝 dispatch，而那时前面的层已经发布——所以在 L0 之前拦下。
+if [ "${FORCE_TESTS:-false}" = "true" ]; then
+  legacy=""
+  while read -r org repo; do
+    [ -n "$repo" ] || continue
+    [ -f "$CLONE_ROOT/$repo/.github/main-ci-gate.json" ] || legacy="$legacy $repo"
+  done <<<"$ROWS"
+  if [ -n "$legacy" ]; then
+    echo "::error::forceTests=true，但这些仓尚未接入修订 A2（无 .github/main-ci-gate.json，其 release workflow 不认 forceTests 输入）：${legacy}。先合并它们的接入 PR，或不用 forceTests。"
+    exit 1
+  fi
+  echo "::warning::forceTests=true：preflight 不查 main CI，各仓发布 run 将跑完整测试"
+  echo '- ⚠️ forceTests=true：跳过，各仓发布 run 跑完整测试' >>"$SUMMARY"
+  exit 0
+fi
 
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT

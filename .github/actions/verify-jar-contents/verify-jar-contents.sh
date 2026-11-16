@@ -11,7 +11,9 @@ set -euo pipefail
 
 GLOBS="${JAR_GLOBS:-}"
 ENTRIES="${JAR_ENTRIES:-}"
+# 允许直接传 tag（vX）：去掉开头的一个 v。
 VERSION="${JAR_VERSION:-}"
+VERSION="${VERSION#v}"
 nonblank() { [ -n "$(tr -d '[:space:]' <<<"$1")" ]; }
 die() { echo "::error::[verify-jar-contents] $*" >&2; exit 1; }
 

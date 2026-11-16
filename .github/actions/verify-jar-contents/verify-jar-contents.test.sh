@@ -37,6 +37,11 @@ run $'en/build/libs/*.jar\nzh/build/libs/*.jar' "$SPI" 1.0.49
 [ "$rc" = 0 ] || fail "应通过，rc=$rc"
 grep -q '2 个 jar 通过' "$TMP/out" || fail "应检查 2 个主 jar（忽略 -sources）"
 
+newcase tag-form-version
+mkjar "$TMP/w/build/libs/x-1.0.49.jar" a/B.class
+run 'build/libs/*.jar' '\.class$' v1.0.49
+[ "$rc" = 0 ] || fail "传 tag 形式 v1.0.49 应去掉 v 后比对"
+
 newcase missing-entry
 mkjar "$TMP/w/build/libs/x-1.0.49.jar" aster/lang/En.class
 run 'build/libs/*.jar' "$SPI" 1.0.49

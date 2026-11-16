@@ -151,6 +151,14 @@ fx "repos/$REPO/compare/main...$SHA" '{"status":"ahead"}'
 gate; expect_rc 1; expect_err "不在 main 上"
 [ "$(grep -c 'compare' "$CALLS")" = "1" ] || fail "不在 main 上应只查一次就拦"
 
+newcase diverged
+fx "$RUNS_EP" "$(runs)"
+fx "repos/$REPO/compare/main...$SHA" '{"status":"diverged"}'
+gate; expect_rc 1; expect_err "不在 main 上"
+newcase compare-fails
+fx "$RUNS_EP" "$(runs)"
+gate; expect_rc 1; expect_err "找不到 ci.yml"   # compare 查询失败 = 不确定 → 按「还没出现」有界等待后拦
+
 # 8. 没有 run、SHA 在 main 上 → 等到出现上限后拦；中途出现则放行。
 newcase never-appears
 fx "$RUNS_EP" "$(runs)"

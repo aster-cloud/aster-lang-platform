@@ -116,14 +116,21 @@ gate_cfg aster-lang-core '["build"]'; red aster-lang-core "$A" build
 DRY=true pre; [ "$rc" = 1 ] || fail "dryRun 下红也应失败"
 [ -s "$RERUNS" ] && fail "dryRun 不得重跑"
 
-# 6. forceTests：整体跳过，不调 API。
+# 6. forceTests：有未接入的仓 → L0 前拦（它们的 workflow 不认 forceTests）；全部接入 → 整体跳过，不调 API。
 newcase force
 gate_cfg aster-lang-core '["build"]'; red aster-lang-core "$A" build
 set +e
 PATH="$TMP/bin:$PATH" GH_TOKEN=x LAYERS="$LAYERS" MAIN_SHAS="$SHAS" CLONE_ROOT="$FIX/clones" FORCE_TESTS=true \
   bash "$PRE" >"$FIX/.out" 2>&1; rc=$?
 set -e
-[ "$rc" = 0 ] || fail "forceTests 应跳过，rc=$rc"; [ -s "$CALLS" ] && fail "forceTests 不应调 API"
+[ "$rc" = 1 ] || fail "forceTests 时仍有未接入的仓（test、ts 无配置）应在 L0 前拦下，rc=$rc"
+grep -q 'aster-lang-test aster-lang-ts' "$FIX/.out" || fail "应列出未接入的仓"
+gate_cfg aster-lang-test '["Build & test (JDK)"]'; gate_cfg aster-lang-ts '["test (24)"]'
+set +e
+PATH="$TMP/bin:$PATH" GH_TOKEN=x LAYERS="$LAYERS" MAIN_SHAS="$SHAS" CLONE_ROOT="$FIX/clones" FORCE_TESTS=true \
+  bash "$PRE" >"$FIX/.out" 2>&1; rc=$?
+set -e
+[ "$rc" = 0 ] || fail "全部接入后 forceTests 应跳过，rc=$rc"; [ -s "$CALLS" ] && fail "forceTests 不应调 API"
 
 # 7. MAIN_SHAS 缺该仓 → fail-closed；LAYERS 非法 → fail-closed。
 newcase no-sha
