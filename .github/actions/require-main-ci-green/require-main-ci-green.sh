@@ -53,6 +53,11 @@ warn() { echo "::warning::[main-ci-gate${REPO:+ $REPO}] $*" >&2; }
 deny() { err "$*"; echo "- ❌ \`$REPO\` @ \`${SHA:0:12}\`：$*" >>"$SUMMARY"; exit 1; }
 emit() { echo "$1=$2" >>"$OUT"; }
 
+# 数值输入先校验再参与算术：$(( )) 会对非数字做表达式求值。
+for _v in "$POLL" "${GATE_TIMEOUT:-0}" "${GATE_APPEAR_TIMEOUT:-0}" "${GATE_MAX_POLLS:-0}" "${GATE_APPEAR_MAX_POLLS:-0}"; do
+  [[ "$_v" =~ ^[0-9]{1,6}$ ]] || { echo "::error::[main-ci-gate] 轮询/超时参数必须是非负整数：'$_v'" >&2; exit 1; }
+done
+
 # polls_for 秒数 → 轮数（至少 1 轮）。
 polls_for() { local p="$POLL"; [ "$p" -gt 0 ] || p=1; echo $(( ($1 + p - 1) / p )); }
 MAX_POLLS="${GATE_MAX_POLLS:-$(polls_for "${GATE_TIMEOUT:-1800}")}"

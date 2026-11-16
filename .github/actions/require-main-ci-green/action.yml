@@ -78,5 +78,9 @@ runs:
         GATE_TIMEOUT_MIN: ${{ inputs.timeout-minutes }}
         GATE_APPEAR_TIMEOUT_MIN: ${{ inputs.appear-timeout-minutes }}
       run: |
+        # 先校验再做算术：$(( )) 会对非数字输入做表达式求值（可执行命令替换）。
+        for v in "$GATE_TIMEOUT_MIN" "$GATE_APPEAR_TIMEOUT_MIN"; do
+          [[ "$v" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "::error::timeout 输入必须是 1–999 的整数分钟：'$v'"; exit 1; }
+        done
         GATE_TIMEOUT=$(( GATE_TIMEOUT_MIN * 60 )) GATE_APPEAR_TIMEOUT=$(( GATE_APPEAR_TIMEOUT_MIN * 60 )) \
           bash "$GITHUB_ACTION_PATH/require-main-ci-green.sh"

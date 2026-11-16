@@ -275,6 +275,14 @@ gate; expect_rc 1; expect_err "必需 job 列表为空"
 newcase bad-sha
 GATE_SHA_OVERRIDE=main gate; expect_rc 1; expect_err "40 位 commit SHA"
 
+# 16b. 数值参数先校验：非数字不进入算术展开（否则 $(( )) 会执行其中的命令替换）。
+newcase bad-number
+set +e
+PATH="$TMP/bin:$PATH" GH_TOKEN=dummy GATE_REPO="$REPO" GATE_SHA="$SHA" GATE_CONFIG="$CONFIG" \
+  GATE_TIMEOUT='x[$(touch '"$FIX"'/pwned)]' bash "$GATE" >"$FIX/.stdout" 2>"$FIX/.stderr"; rc=$?
+set -e
+expect_rc 1; expect_err "非负整数"; [ ! -e "$FIX/pwned" ] || fail "非数字参数不得被求值"
+
 # 17. 查询持续失败 → 有界后拦（不会无限等，也不会误放行）。
 newcase query-fails
 MAXP=2 gate; expect_rc 1; expect_err "持续失败"
