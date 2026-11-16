@@ -23,7 +23,7 @@
 |---|---|---|
 | Contents | Read and write | 推 `train/aster-api-pin-<X>` 分支；读 main 上的两个 pin 文件 |
 | Pull requests | Read and write | 开 PR、查询同名 PR、合并（`gh pr merge --squash --match-head-commit`） |
-| Checks | Read-only | 读 PR head 上 `ci-result`、`Guard bypass suite (#466)`、`build-hosted / build` 的 check-run 与注解 |
+| Checks | Read-only | 读 PR head 上 `ci-result`、`Guard bypass suite (#466)` 与托管路径 `build-hosted / *` 各 job 的 check-run 与注解 |
 | Actions | Read and write | 读 CI run 的 `run_attempt`；可证实超时时 `gh run rerun --failed`，至多一次 |
 | Metadata | Read-only | 必选基线，自动勾选 |
 
