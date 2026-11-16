@@ -43,6 +43,10 @@ on:
         description: '列车结束后（成功或失败）清理本列车的临时制品与 tag-ref 缓存（ADR 0053 §9）'
         type: boolean
         default: true
+      forceTests:
+        description: '各仓发布 run 跑完整测试，不依赖 main CI 结果（ADR 0053 修订 A2 的逃生口；缺省只要求 main CI 已对要发布的 commit 通过）'
+        type: boolean
+        default: false
 
 concurrency:
   group: release-train
@@ -167,6 +171,20 @@ jobs:
           echo "api_pin_action=${API_PIN_ACTION:-none}"
           echo "preflight drift gate: all artifacts match release-plan ✅"
 
+      # ADR 0053 修订 A2：各仓发布 run 不再重跑测试，要求 main CI 对要发布的 commit 已通过。
+      # 开车前对所有参与仓统一查一遍（读上一步克隆的各仓门禁配置），不绿就停在 L0 之前；
+      # 非 dryRun 时对 attempt 1 的红 run 自动重跑失败 job 一次（lockstep pin 逐仓合并的竞态，见脚本头）。
+      - name: Main CI gate across release repos (ADR 0053 A2)
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          WONTLOST_TOKEN: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
+          LAYERS: ${{ needs.plan.outputs.layers }}
+          MAIN_SHAS: ${{ steps.drift.outputs.main_shas }}
+          DRY_RUN: ${{ inputs.dryRun }}
+          FORCE_TESTS: ${{ inputs.forceTests }}
+          CLONE_ROOT: /tmp
+        run: bash scripts/release-plan/preflight-main-ci.sh
+
       # ADR 0053 修订 A1 §7：api_pin_action=bump 时打印列车将在 L4 提交的 diff（只在本地 clone 里改，不推送）。
       - name: Preview aster-api pin bump
         if: ${{ steps.drift.outputs.api_pin_action != 'none' }}
@@ -213,6 +231,7 @@ jobs:
           TRAIN_ID: ${{ inputs.trainId || github.run_id }}
           MAIN_SHAS: ${{ needs.preflight.outputs.main_shas }}
           TRAIN_MANIFEST: ${{ runner.temp }}/train-manifest.json
+          FORCE_TESTS: ${{ inputs.forceTests }}
         run: bash scripts/release-plan/run-train.sh
 
       # ADR 0053 修订 A1 §6：aster-api pin 由专用 GitHub App 推分支 / 开 PR / 合并（不需要规则集 bypass）。
@@ -264,6 +283,7 @@ jobs:
           TRAIN_ID: ${{ inputs.trainId || github.run_id }}
           MAIN_SHAS: ${{ needs.preflight.outputs.main_shas }}
           TRAIN_MANIFEST: ${{ runner.temp }}/train-manifest.json
+          FORCE_TESTS: ${{ inputs.forceTests }}
           PIN_TOKEN: ${{ steps.pintoken.outputs.token }}
           PIN_TOKEN_ISSUED_AT: ${{ steps.pinreq.outputs.issued_at }}
           PIN_APP_SLUG: ${{ steps.pintoken.outputs.app-slug }}

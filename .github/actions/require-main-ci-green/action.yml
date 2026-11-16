@@ -1,0 +1,82 @@
+name: Require main CI green for the released commit
+description: >
+  发布门禁（ADR 0053 修订 A2）：要发布的 commit 必须已经在 main 的 CI 上通过，
+  发布 run 不再重跑完整测试。判定规则、重跑与 flake 的处理见同目录 require-main-ci-green.sh 文件头。
+
+  tag-push 发布与列车 dispatch 的发布走同一条路径：列车只负责建 tag，真正发布的永远是
+  tag-push 触发的 publish job，本门禁放在那里。
+
+  逃生口：annotated tag 的消息含一行 `release-gate: force-tests`（列车 forceTests=true 时由
+  create-tag 写入；手工发版用 `git tag -a vX -m 'release-gate: force-tests'`），或 force-tests 输入为
+  true → 门禁跳过，输出 force-tests=true，调用方据此跑完整测试。
+
+  调用方 job 需要 `permissions: actions: read`（读 run 与 job）与 `contents: read`（读 tag 与 compare）。
+
+inputs:
+  config:
+    description: 门禁配置（JSON：{"workflow":"ci.yml","requiredJobs":[…]}），相对工作区
+    required: false
+    default: .github/main-ci-gate.json
+  sha:
+    description: 要发布的 commit
+    required: false
+    default: ${{ github.sha }}
+  repository:
+    description: owner/name
+    required: false
+    default: ${{ github.repository }}
+  branch:
+    description: CI 必须在哪个分支的 push 上通过
+    required: false
+    default: main
+  tag:
+    description: 本次发布的 tag（读 force-tests 标记）；空则不读
+    required: false
+    default: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+  force-tests:
+    description: true 时跳过门禁（调用方必须自己跑完整测试）
+    required: false
+    default: 'false'
+  token:
+    description: 对本仓有 actions:read + contents:read 的 token
+    required: false
+    default: ${{ github.token }}
+  timeout-minutes:
+    description: 等 CI run 结束的上限（分钟）
+    required: false
+    default: '30'
+  appear-timeout-minutes:
+    description: CI run 尚未出现时的等待上限（分钟）
+    required: false
+    default: '5'
+
+outputs:
+  force-tests:
+    description: "'true' = 门禁被跳过，调用方必须跑完整测试；否则 'false'"
+    value: ${{ steps.gate.outputs.force-tests }}
+  run-id:
+    description: 放行所依据的 CI run id
+    value: ${{ steps.gate.outputs.run-id }}
+  run-url:
+    description: 放行所依据的 CI run 链接
+    value: ${{ steps.gate.outputs.run-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Require main CI green
+      id: gate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GATE_REPO: ${{ inputs.repository }}
+        GATE_SHA: ${{ inputs.sha }}
+        GATE_CONFIG: ${{ inputs.config }}
+        GATE_BRANCH: ${{ inputs.branch }}
+        GATE_TAG: ${{ inputs.tag }}
+        GATE_FORCE_TESTS: ${{ inputs.force-tests }}
+        GATE_TIMEOUT_MIN: ${{ inputs.timeout-minutes }}
+        GATE_APPEAR_TIMEOUT_MIN: ${{ inputs.appear-timeout-minutes }}
+      run: |
+        GATE_TIMEOUT=$(( GATE_TIMEOUT_MIN * 60 )) GATE_APPEAR_TIMEOUT=$(( GATE_APPEAR_TIMEOUT_MIN * 60 )) \
+          bash "$GITHUB_ACTION_PATH/require-main-ci-green.sh"

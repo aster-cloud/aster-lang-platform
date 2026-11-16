@@ -47,6 +47,12 @@ jobs:
       - name: train aster-api pin regression test
         run: bash scripts/release-plan/train-api-pin.test.sh
 
+      # ADR 0053 修订 A2：共享发布门禁 require-main-ci-green 与列车 preflight main CI 检查的回归测试。
+      - name: require-main-ci-green regression test
+        run: bash .github/actions/require-main-ci-green/require-main-ci-green.test.sh
+      - name: preflight main CI gate regression test
+        run: bash scripts/release-plan/preflight-main-ci.test.sh
+
       # workflow 静态检查（review L12），钉死版本。
       - name: actionlint
         run: |

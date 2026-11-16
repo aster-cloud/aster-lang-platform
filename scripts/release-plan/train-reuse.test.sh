@@ -124,6 +124,19 @@ jq -e '.steps[] | select(.repo=="aster-lang-core" and .tag=="v9.9.9" and .commit
 jq -e '.trainId=="T1"' "$TRAIN_MANIFEST" >/dev/null || fail "manifest：缺 trainId"
 unset TRAIN_MANIFEST
 echo "PASS: 成功路径写出 train manifest（repo/tag/commit/run）"
+grep -q 'forceTests' "$CALLS" && fail "manifest：未开 forceTests 时 dispatch 不得带 forceTests input（老 workflow 会拒收）"
+
+# ── 3b. ADR 0053 修订 A2：FORCE_TESTS=true 时 dispatch 带 -f forceTests=true ─────────────
+newcase force-tests
+fx orgs/aster-cloud/packages/maven/cloud.aster-lang.aster-lang-core/versions '[{"name":"9.9.8"}]'
+fx orgs/aster-cloud/packages/maven/cloud.aster-lang.aster-lang-core/versions '[{"name":"9.9.9"}]' .after
+fx repos/aster-cloud/aster-lang-core/git/refs/tags/v9.9.9 '{"ref":"refs/tags/v9.9.9","object":{"type":"commit","sha":"c0ffee1"}}' .after
+fx repos/aster-cloud/aster-lang-core/actions/workflows/release.yml/runs '{"workflow_runs":[{"id":77,"created_at":"2026-01-01T00:00:00Z","head_sha":"c0ffee1"}]}' .after
+fx repos/aster-cloud/aster-lang-core/actions/runs/77 '{"id":77,"status":"completed","conclusion":"success"}' .after
+FORCE_TESTS=true DRY_RUN=false POLL_MAX=2 LAYERS="[[$(core_step 9.9.9)]]" run_train
+[ "$rc" -eq 0 ] || fail "force-tests：成功路径 rc=$rc"
+grep -q 'gh workflow run release.yml .*-f trainId=T1 -f forceTests=true' "$CALLS" || fail "force-tests：dispatch 应带 -f forceTests=true：$(cat "$CALLS")"
+echo "PASS: forceTests 只在开启时随 dispatch 传给各仓 create-tag"
 
 # ── 4. service deploy：按 trainId 关联 run（不是「最新一个 dispatch run」）+ 独立上限 ──
 newcase service

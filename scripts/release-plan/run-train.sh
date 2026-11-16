@@ -58,6 +58,11 @@ SERVICE_POLL_MAX="${SERVICE_POLL_MAX:-180}"
 # 缺省 15 × 20s = 5min：run 出现在列表里通常只要几秒，5 分钟仍找不到标题即可判定 deploy.yml 没有 run-name。
 SERVICE_FALLBACK_AFTER="${SERVICE_FALLBACK_AFTER:-15}"
 TO="${TO_LAYER:-}"
+# ADR 0053 修订 A2：发布 run 不再重跑测试，改为要求 main CI 对该 commit 已通过。forceTests=true 时
+# 列车让各仓 create-tag 打带「release-gate: force-tests」标记的 annotated tag，发布 run 据此跑完整测试。
+# 只在 true 时才传这个 input：老版本的 release workflow 没有它，带上会让 dispatch 直接失败。
+FORCE_ARGS=()
+[ "${FORCE_TESTS:-false}" = "true" ] && FORCE_ARGS=(-f forceTests=true)
 # ── ADR 0053 修订 A1：列车接管 aster-api pin bump ──────────────────────────────
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIN_TOKEN="${PIN_TOKEN:-}"
@@ -716,14 +721,14 @@ run_step() {  # $1 = step JSON
 
   if [ "$DRY" = "true" ]; then
     record_step "$step" dry-run "$tag" "" ""
-    log "  [dry-run] would: gh workflow run $workflow --repo $REPO_ORG/$repo --ref main -f version=$version -f artifactIds=$ids -f trainId=$TRAIN_ID"
+    log "  [dry-run] would: gh workflow run $workflow --repo $REPO_ORG/$repo --ref main -f version=$version -f artifactIds=$ids -f trainId=$TRAIN_ID ${FORCE_ARGS[*]:-}"
     log "  [dry-run] then wait tag $tag → wait push run → wait ALL artifacts visible"
     return 0
   fi
 
   since=$(since_iso)
   gh workflow run "$workflow" --repo "$REPO_ORG/$repo" --ref main \
-    -f version="$version" -f artifactIds="$ids" -f trainId="$TRAIN_ID"
+    -f version="$version" -f artifactIds="$ids" -f trainId="$TRAIN_ID" ${FORCE_ARGS[@]+"${FORCE_ARGS[@]}"}
   log "  dispatched; waiting for tag $tag ..."
   # 显式处理失败而不依赖 set -e 的隐式退出：典型原因是兄弟仓 release.yml 的
   # create-tag 因 dispatch version != build.gradle.kts version 而失败，tag 永不出现。
