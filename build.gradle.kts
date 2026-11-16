@@ -286,7 +286,13 @@ group = "cloud.aster-lang"
 //   ui-messages-hi 1.0.24 无变更，幂等 skip。aster-api 的 pin 首次由列车在 L4 接管（ADR 0053 修订 A1，
 //   release-plan 的 aster-api:service pinOwner=train）。
 //
-version = "1.0.48"
+// 1.0.49：发布门禁改造（ADR 0053 修订 A2）。全部仓的 release workflow 不再重跑测试，改为发布前要求 main CI
+//   已对该 commit 通过（共享 action require-main-ci-green 与各仓 .github/main-ci-gate.json；forceTests 为逃生口）；
+//   platform：列车 preflight 增加 main CI 检查，pin PR 的可证实超时按 build-hosted / * 匹配并绑定当前 CI run
+//   （#127 #128）。各仓自 v1.0.48 只有 workflow / CI 配置变化，引擎源码无变更，lockstep 重新打 tag。npm 包内容
+//   均无变化：ts npm 3.1.0、test:npm 2.2.0、ui-messages 1.0.31、ui-messages-hi 1.0.24 保持不变，列车幂等 skip。
+//
+version = "1.0.49"
 
 catalog {
     versionCatalog {
@@ -302,7 +308,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.48")
+        version("asterLang", "1.0.49")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
