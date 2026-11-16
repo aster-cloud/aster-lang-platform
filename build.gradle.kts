@@ -274,7 +274,19 @@ group = "cloud.aster-lang"
 //   删除 typeInferenceRules，故取 major）由本次列车 ts:npm 层发布。runtime/validation/hi 源码无变更，lockstep
 //   重新打 tag；hi:npm 1.0.24 无变更，幂等 skip。
 //
-version = "1.0.47"
+// 1.0.48：解析器修复与双引擎 parity 清扫（ADR 0056 修订 A1）。core：`X of` 按名字定元数（list / option 恰一个参数，
+//   result 至多两个），result / option 产出 Result / Option 节点而非 TypeApp；函数类型与括号类型合并、类型内预测
+//   切 SLL（病态类型从数十秒降到毫秒）；解析器层嵌套守卫（E054）（#270，#256 #254 #255）。括号类型表里开放元数
+//   `X of A, B` 的歧义逗号报 E064；manifest 的 io / cpu 类别键按 capabilities.json 展开；E601 改为保留码（#271）。
+//   truffle：宿主调用入口按声明安装 effect 权限，workflow / Start 的 worker 线程进入 context（#179，#174 #175）。
+//   test：X of 元数 / 边界 tier1 样本与规则头单行、歧义逗号等必拒样本（#208 #209）——npm 包只新增语料样本，
+//   test:npm 2.1.0 → 2.2.0。ts npm 3.1.0（ts#326 #327：规则头单行、X of 边界、E064、LSP 效果快修、manifest 能力
+//   检查与 core 一致；公开导出无删减，新增 error 级诊断按 ADR 0046 §11.7 第 11 条取 minor）由本次列车 ts:npm 层
+//   发布。locales / hi / runtime / validation 源码无变更，lockstep 重新打 tag；ui-messages 1.0.31、
+//   ui-messages-hi 1.0.24 无变更，幂等 skip。aster-api 的 pin 首次由列车在 L4 接管（ADR 0053 修订 A1，
+//   release-plan 的 aster-api:service pinOwner=train）。
+//
+version = "1.0.48"
 
 catalog {
     versionCatalog {
@@ -290,7 +302,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.47")
+        version("asterLang", "1.0.48")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
