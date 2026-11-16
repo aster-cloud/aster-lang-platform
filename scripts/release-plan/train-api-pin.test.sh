@@ -134,7 +134,7 @@ checks() {
   echo "{\"check_runs\":[
     {\"id\":$4,\"name\":\"build-hosted / build\",\"status\":\"completed\",\"conclusion\":\"$3\",\"app\":{\"id\":15368},\"details_url\":\"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/1\"},
     {\"id\":$(($4+1)),\"name\":\"Guard bypass suite (#466)\",\"status\":\"completed\",\"conclusion\":\"$2\",\"app\":{\"id\":15368}},
-    {\"id\":$(($4+2)),\"name\":\"ci-result\",\"status\":\"completed\",\"conclusion\":\"$1\",\"app\":{\"id\":15368}}]}"
+    {\"id\":$(($4+2)),\"name\":\"ci-result\",\"status\":\"completed\",\"conclusion\":\"$1\",\"app\":{\"id\":15368},\"details_url\":\"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/9\"}]}"
 }
 # 成功合并 + push deploy 闭环的 fixture
 merged_fixtures() {
@@ -353,7 +353,7 @@ SPLIT='{"check_runs":[
   {"id":13,"name":"build-hosted / integration","status":"completed","conclusion":"cancelled","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/3"},
   {"id":14,"name":"build-hosted / verify","status":"completed","conclusion":"skipped","app":{"id":15368}},
   {"id":15,"name":"Guard bypass suite (#466)","status":"completed","conclusion":"success","app":{"id":15368}},
-  {"id":16,"name":"ci-result","status":"completed","conclusion":"failure","app":{"id":15368}}]}'
+  {"id":16,"name":"ci-result","status":"completed","conclusion":"failure","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/9"}]}'
 fx "$API/commits/HEAD/check-runs" "$SPLIT"
 fx "$API/check-runs/13/annotations" '[{"message":"The job running on runner GitHub Actions 9 has exceeded the maximum execution time of 30 minutes."}]'
 fx "$API/check-runs/12/annotations" '[{"message":"Process completed with exit code 1."}]'
@@ -374,7 +374,36 @@ fx "$API/check-runs/12/annotations" '[{"message":"Process completed with exit co
 DRY_RUN=false POLL_MAX=1 run_train
 [ "$rc" -ne 0 ] || fail "split-no-timeout：无超时证据应停车"
 grep -q 'run rerun' "$CALLS" && fail "split-no-timeout：不得重跑"
-echo "PASS: 可证实超时（timed_out 或注解）且 run_attempt==1 → 重跑一次；attempt>=2 停车；拆分后的托管 job 同样适用"
+# 7c. 拆分后某 job conclusion=timed_out → 直接证实；同一 commit 上旧 run（800）的超时不算证据。
+newcase split-timed-out
+mkremote 1.0.47 1.0.47
+fx "$API/pulls" '[]'
+fx "$API/pulls" '{"number":42}' .POST
+fx "$API/commits/HEAD/check-runs" '{"check_runs":[
+  {"id":21,"name":"build-hosted / unit","status":"completed","conclusion":"timed_out","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/2"},
+  {"id":22,"name":"Guard bypass suite (#466)","status":"completed","conclusion":"success","app":{"id":15368}},
+  {"id":23,"name":"ci-result","status":"completed","conclusion":"failure","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/9"}]}'
+fx "$API/commits/HEAD/check-runs" "$(checks success success success 30)" .rerun.seq.1
+fx "$API/actions/runs/900" '{"id":900,"run_attempt":1}'
+merged_fixtures
+DRY_RUN=false POLL_MAX=1 SERVICE_POLL_MAX=2 SERVICE_FALLBACK_AFTER=2 run_train
+[ "$rc" -eq 0 ] || fail "split-timed-out：拆分后 job timed_out 应证实并重跑，rc=$rc"
+grep -q 'TOKEN=app gh run rerun 900 --failed' "$CALLS" || fail "split-timed-out：应重跑 run 900"
+newcase old-run-evidence
+mkremote 1.0.47 1.0.47
+fx "$API/pulls" '[]'
+fx "$API/pulls" '{"number":42}' .POST
+fx "$API/commits/HEAD/check-runs" '{"check_runs":[
+  {"id":5,"name":"build-hosted / unit","status":"completed","conclusion":"timed_out","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/800/job/2"},
+  {"id":31,"name":"build-hosted / unit","status":"completed","conclusion":"failure","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/2"},
+  {"id":32,"name":"Guard bypass suite (#466)","status":"completed","conclusion":"success","app":{"id":15368}},
+  {"id":33,"name":"ci-result","status":"completed","conclusion":"failure","app":{"id":15368},"details_url":"https://github.com/wontlost-ltd/aster-api/actions/runs/900/job/9"}]}'
+fx "$API/check-runs/31/annotations" '[{"message":"Process completed with exit code 1."}]'
+fx "$API/actions/runs/800" '{"id":800,"run_attempt":1}'
+DRY_RUN=false POLL_MAX=1 run_train
+[ "$rc" -ne 0 ] || fail "old-run-evidence：当前 run 只是普通失败，应停车"
+grep -q 'run rerun' "$CALLS" && fail "old-run-evidence：旧 run 的超时不得触发重跑"
+echo "PASS: 可证实超时（timed_out 或注解）且 run_attempt==1 → 重跑一次；attempt>=2 停车；拆分后的托管 job 同样适用；证据只取当前 ci-result 所属 run"
 
 # ── 8. strict 拒绝合并（main 前进）→ 停车，不 update-branch ──────────────────────────
 newcase strict

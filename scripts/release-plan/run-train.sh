@@ -397,13 +397,20 @@ pin_checks_state() {  # repo head seen-ids
 # 判定超时：托管构建的 check-run conclusion == timed_out，或其注解含 runner 的固定超时文案。
 # 次数记在 GitHub 自己的 run_attempt 里：只有 run_attempt == 1 才重跑，续跑多少次都只重跑一次。
 pin_maybe_rerun() {  # repo pr head
-  local repo="$1" pr="$2" json rows id concl url msgs run attempt proven="" seen=""
+  local repo="$1" pr="$2" json cur rows id concl url msgs run attempt proven="" seen=""
   local pr_url="https://github.com/$REPO_ORG/$repo/pull/$pr"
   json=$(pin_gh api "repos/$REPO_ORG/$repo/commits/$3/check-runs?per_page=100" 2>/dev/null) || {
     err "PR #$pr 必需检查失败；查询 check-run 失败，无法证实超时 → 不自动重跑，停车。PR 留给人看：$pr_url"; return 1; }
+  # 证据必须来自当前失败的那次 CI run：取最新 ci-result check-run 所属的 run，只看同一 run 的托管 job。
+  # 同一 commit 上更早的 run（例如被并发组取消的旧 run）里的超时不能作为证据。
+  cur=$(jq -r --argjson app "$ACTIONS_APP_ID" '
+    [.check_runs[]? | select(.name == "ci-result" and .app.id == $app)] | sort_by(.id) | last
+    | ((.details_url // "") | capture("/actions/runs/(?<r>[0-9]+)/")? | .r) // empty' <<<"$json" 2>/dev/null || true)
+  [ -n "$cur" ] || { err "PR #$pr 必需检查失败；无法从 ci-result 确定当前 CI run，无法证实超时 → 不自动重跑，停车。PR：$pr_url"; return 1; }
   # 托管路径下未成功的 job，timed_out 排在前面；逐个找超时证据，第一个被证实的即为重跑对象。
-  rows=$(jq -r --arg p "$PIN_HOSTED_BUILD_PREFIX" --argjson app "$ACTIONS_APP_ID" '
+  rows=$(jq -r --arg p "$PIN_HOSTED_BUILD_PREFIX" --arg cur "/actions/runs/$cur/" --argjson app "$ACTIONS_APP_ID" '
     [.check_runs[]? | select((.name | startswith($p)) and .app.id == $app and .status == "completed"
+                             and ((.details_url // "") | contains($cur))
                              and .conclusion != "success" and .conclusion != "skipped")]
     | sort_by(if .conclusion == "timed_out" then 0 else 1 end, -.id)
     | .[] | "\(.id) \(.conclusion) \(.details_url)"' <<<"$json")
