@@ -286,11 +286,17 @@ group = "cloud.aster-lang"
 //   ui-messages-hi 1.0.24 无变更，幂等 skip。aster-api 的 pin 首次由列车在 L4 接管（ADR 0053 修订 A1，
 //   release-plan 的 aster-api:service pinOwner=train）。
 //
-// 1.0.49：发布门禁改造（ADR 0053 修订 A2）。全部仓的 release workflow 不再重跑测试，改为发布前要求 main CI
-//   已对该 commit 通过（共享 action require-main-ci-green 与各仓 .github/main-ci-gate.json；forceTests 为逃生口）；
-//   platform：列车 preflight 增加 main CI 检查，pin PR 的可证实超时按 build-hosted / * 匹配并绑定当前 CI run
-//   （#127 #128）。各仓自 v1.0.48 只有 workflow / CI 配置变化，引擎源码无变更，lockstep 重新打 tag。npm 包内容
-//   均无变化：ts npm 3.1.0、test:npm 2.2.0、ui-messages 1.0.31、ui-messages-hi 1.0.24 保持不变，列车幂等 skip。
+// 1.0.49：发布门禁改造（ADR 0053 修订 A2）与两组语言修正。A2：全部仓的 release workflow 不再重跑测试，改为发布前
+//   要求 main CI 已对该 commit 通过（共享 action require-main-ci-green 与各仓 .github/main-ci-gate.json；forceTests
+//   为逃生口）；platform：列车 preflight 增加 main CI 检查，pin PR 的可证实超时按 build-hosted / * 匹配（#127 #128）。
+//   core：W709 GOV_PII_RETURNED_AS_TEXT——@pii 输入字段流入返回的 Text 给不阻断警告（#276，aster-cloud#772）；
+//   签名与类型别名语法对齐 ts（尖括号泛型 E056、大写形参名 E055、Type 别名关键词、前缀 maybe）（#277，ts#328）；
+//   语料测试在 CI 中缺语料即失败（#275）。locales / hi：W709 的 zh / de / hi-IN 诊断译文与共享码表（#142、#107，
+//   只改 Maven overlay 与测试基线，ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，幂等 skip）。test：ts#328 的
+//   tier1 与必拒样本（#213）——npm 包只新增语料样本，test:npm 2.2.0 → 2.3.0。ts npm 3.2.0（ts#331 W709、ts#332
+//   形参前置注解 / result of A or B 报 E062 / maybe of 报 E061；公开导出只增不删，新增 warning 与新拒绝写法按
+//   ADR 0046 §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。runtime / validation / truffle 源码无变更，
+//   lockstep 重新打 tag。
 //
 version = "1.0.49"
 
