@@ -263,10 +263,13 @@ scripts/gate-scan/java-gate/java-gate.sh scan --old-cp ~/wt-gate-x/old.cp --new-
 - **语言包预检失败**：任一侧没注册全部四个 lexicon。core 的 `LexiconRegistry` 经线程上下文类加载器（TCCL）上的 SPI 发现
   zh / de / hi 语言包，门禁在每次反射调用前把 TCCL 设成该侧的类加载器。没设 TCCL 时只有 en-US：zh-CN / de-DE 全部 UNCODED
   失败、hi-IN 静默回退 en-US——2026-11-17 之前本地的 Java 门禁一直如此，只扫过 en-US。
-- **与 ts 扫描对账失败**（`--ts-scan` 或 `--ts-old-sources-ok`）：Java 与 ts「旧版在任一 lexicon 下能编译的源数」差距超过
-  `--max-gap-pct`（缺省 5%）。按源计而不按「源 × lexicon」计：Java 的 zh / de / hi 词法表回退 en-US，英文源在四个 lexicon 下
+- **与 ts 扫描对账失败**（`--ts-scan`，或 `--ts-old-sources-ok N --ts-sources-total M`）：ts 扫的源数 M 与本次不同
+  （不是同一份导出），或 Java 与 ts「旧版在任一 lexicon 下能编译的源数」差距超过 `--max-gap-pct`（缺省 5%）。
+  不给 ts 输出时打印 `sanity: SKIPPED`，只靠上面的语言包预检——发布列车门禁务必给 `--ts-scan`。这一项是第二道防线：
+  它只在「只能用 zh / de 编译的源」超过阈值时才能发现缺包，hi-IN 回退 en-US 时发现不了；第一道防线是预检。按源计而不按「源 × lexicon」计：Java 的 zh / de / hi 词法表回退 en-US，英文源在四个 lexicon 下
   都能编译，逐 lexicon 的成功数两边天然不同（2026-11-17 生产：Java 344 vs ts 269 / 440，按源计两边都是 110 / 110）。
 - classpath 文件或其中任一条目不存在（`URLClassLoader` 会静默跳过缺失条目）、金丝雀源编译失败、导出完成标记缺失或不符。
+- JVM 异常结束：任何未捕获的 `Throwable`（含 `NoClassDefFoundError` 等 Error）、或退出码 0 / 1 却没有对应的 `result:` 行。
 
 调用引擎期间 `System.out` / `System.err` 指向空流，报告只含 id / kind / lexicon / 诊断码 / IR 键路径。
 

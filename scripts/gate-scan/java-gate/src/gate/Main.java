@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * System.out / System.err 指向空流，防止引擎日志带出源码片段。
  *
  * <p>用法：java -cp &lt;本工具 classes&gt; gate.Main --old-cp &lt;文件&gt; --new-cp &lt;文件&gt;
- * --sources &lt;jsonl&gt; [--sources …] [--ts-old-sources-ok N [--max-gap-pct P]]
+ * --sources &lt;jsonl&gt; [--sources …] [--ts-old-sources-ok N --ts-sources-total M [--max-gap-pct P]]
  *
  * <p>退出码：0 = 无需复核项；1 = 有需复核项；2 = 用法错误；3 = 环境错误（classpath 条目缺失、lexicon 未注册、
  * 金丝雀失败、导出损坏、与 ts 扫描的「旧版可编译源数」差距过大）——3 一律不得当作通过。
@@ -105,30 +105,36 @@ public final class Main {
     }
 
     /** 命令行参数。 */
-    private record Args(String oldCp, String newCp, List<String> sources, Integer tsOldSourcesOk, int maxGapPct) {
+    private record Args(String oldCp, String newCp, List<String> sources, Integer tsOldSourcesOk, Integer tsSourcesTotal,
+                        int maxGapPct) {
         static Args parse(String[] argv) {
             String oldCp = null;
             String newCp = null;
             List<String> sources = new ArrayList<>();
             Integer tsOldOk = null;
-            int maxGap = DEFAULT_MAX_GAP_PCT;
+            Integer tsTotal = null;
+            Integer maxGap = null;
             for (int i = 0; i < argv.length; i++) {
                 String value = i + 1 < argv.length ? argv[i + 1] : null;
+                if (value == null || value.startsWith("--")) throw new IllegalArgumentException(argv[i] + " 缺少取值");
                 switch (argv[i]) {
                     case "--old-cp" -> oldCp = value;
                     case "--new-cp" -> newCp = value;
                     case "--sources" -> sources.add(value);
                     case "--ts-old-sources-ok" -> tsOldOk = parseCount(value);
+                    case "--ts-sources-total" -> tsTotal = parseCount(value);
                     case "--max-gap-pct" -> maxGap = parseCount(value);
                     default -> throw new IllegalArgumentException("未知参数：" + argv[i]);
                 }
-                if (value == null) throw new IllegalArgumentException(argv[i] + " 缺少取值");
                 i++;
             }
-            if (oldCp == null || newCp == null || sources.isEmpty() || sources.contains(null)) {
+            if (oldCp == null || newCp == null || sources.isEmpty()) {
                 throw new IllegalArgumentException("缺少 --old-cp / --new-cp / --sources");
             }
-            return new Args(oldCp, newCp, sources, tsOldOk, maxGap);
+            if ((tsOldOk == null) != (tsTotal == null) || (maxGap != null && tsOldOk == null)) {
+                throw new IllegalArgumentException("--ts-old-sources-ok 与 --ts-sources-total 须同时给出；--max-gap-pct 只能与它们一起用");
+            }
+            return new Args(oldCp, newCp, sources, tsOldOk, tsTotal, maxGap == null ? DEFAULT_MAX_GAP_PCT : maxGap);
         }
 
         private static int parseCount(String s) {
@@ -152,7 +158,7 @@ public final class Main {
         } catch (IllegalArgumentException e) {
             ERR.println(e.getMessage());
             ERR.println("用法：gate.Main --old-cp <文件> --new-cp <文件> --sources <jsonl> [--sources …] "
-                + "[--ts-old-sources-ok N [--max-gap-pct P]]");
+                + "[--ts-old-sources-ok N --ts-sources-total M [--max-gap-pct P]]");
             System.exit(2);
             return;
         }
@@ -165,10 +171,11 @@ public final class Main {
             ERR.println("环境错误：" + e.getMessage());
             OUT.println("result: ERROR (environment)");
             code = 3;
-        } catch (Exception e) {
-            // 只给异常类名：异常消息可能带源码片段
-            ERR.println("环境错误：意外异常 " + e.getClass().getName());
-            OUT.println("result: ERROR (unexpected " + e.getClass().getSimpleName() + ")");
+        } catch (Throwable t) {
+            // 含 Error（NoClassDefFoundError、ExceptionInInitializerError、OutOfMemoryError…）：缺省处理器会把堆栈打到已换成
+            // 空流的 System.err 并以 1 退出，看起来像 REVIEW。这里统一为 3，且只给异常类名（异常消息可能带源码片段）
+            ERR.println("环境错误：意外异常 " + t.getClass().getName());
+            OUT.println("result: ERROR (unexpected " + t.getClass().getSimpleName() + ")");
             code = 3;
         }
         OUT.flush();
@@ -244,7 +251,15 @@ public final class Main {
             g.getValue().forEach(l -> OUT.println("  " + l));
         }
         OUT.println("ir-diff histogram (b=expected TypeApp→Result/Option, c=other): " + histogram);
-        if (args.tsOldSourcesOk() != null && !sane(stats[6], args.tsOldSourcesOk(), args.maxGapPct())) return 3;
+        if (args.tsOldSourcesOk() == null) {
+            OUT.println("sanity: SKIPPED (no ts scan given; the four-lexicon preflight still ran)");
+        } else if (args.tsSourcesTotal() != rows.size()) {
+            OUT.println("sanity: ts scanned " + args.tsSourcesTotal() + " sources, java " + rows.size() + " — different exports");
+            OUT.println("result: INVALID (ts scan is of a different export)");
+            return 3;
+        } else if (!sane(stats[6], args.tsOldSourcesOk(), args.maxGapPct())) {
+            return 3;
+        }
         int bad = 0;
         for (String g : List.of("newly-failing-E064", "newly-failing", "throws", "changed-codes", "ir-changed-other",
             "ir-changed-cols-only")) {

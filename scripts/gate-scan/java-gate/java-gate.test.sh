@@ -45,7 +45,9 @@ EOF
 JACKSON_CP="$JK/jackson-core-$JACKSON_VERSION.jar:$JK/jackson-databind-$JACKSON_VERSION.jar:$JK/jackson-annotations-$JACKSON_VERSION.jar"
 
 # ---------- 桩引擎：old / new 两个 jar（只差 stub-build.txt），每个语言包一个 jar ----------
-"$JH/bin/javac" -encoding UTF-8 -d "$TMP/stub-classes" $(find "$HERE/test/stub-engine" -name '*.java')
+STUB_SRC=()
+while IFS= read -r f; do STUB_SRC+=("$f"); done < <(find "$HERE/test/stub-engine" -name '*.java')
+"$JH/bin/javac" -encoding UTF-8 -d "$TMP/stub-classes" "${STUB_SRC[@]}"
 for build in old new; do
   mkdir -p "$TMP/res-$build"
   echo "$build" >"$TMP/res-$build/stub-build.txt"
@@ -70,6 +72,7 @@ mkcp() {  # 输出文件 build 语言包…
 mkcp "$TMP/old.cp" old zh-CN de-DE hi-IN
 mkcp "$TMP/new.cp" new zh-CN de-DE hi-IN
 mkcp "$TMP/new-nozh.cp" new de-DE hi-IN
+printf '%s' "$TMP/engine-old.jar:$TMP/lex-zh-CN.jar:$TMP/lex-de-DE.jar:$TMP/lex-hi-IN.jar" >"$TMP/old-nojackson.cp"
 
 # ---------- 合成导出 ----------
 # jsonl 输出文件 [--count N] id=指令 …（kind 由 id 前缀推断，content 带 SECRET_TEXT_ 标记）
@@ -162,8 +165,17 @@ printf 'old compiles: 5 ok, 0 threw, 7 not ok / 12 compiles\nold sources ok in a
 run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-scan "$TMP/ts-scan.txt"
 has 'sanity: old sources ok in any lexicon: java 2 vs ts 2 (gap 0, allowed 1 = 5%) — ok'
 
+CASE=sanity-skipped
+run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl"
+has 'sanity: SKIPPED'
+
+CASE=sanity-other-export
+printf 'old sources ok in any lexicon: 2 / 999\n' >"$TMP/ts-other.txt"
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-scan "$TMP/ts-other.txt"
+has 'result: INVALID (ts scan is of a different export)'
+
 CASE=sanity-gap
-run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok 20
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok 20 --ts-sources-total 3
 has 'TOO LARGE'
 has 'result: INVALID (java/ts old-ok sources gap too large)'
 hasnt 'result: PASS'
@@ -172,8 +184,17 @@ CASE=sanity-bad-ts-file
 echo 'nothing here' >"$TMP/ts-bad.txt"
 run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-scan "$TMP/ts-bad.txt"
 
+CASE=jvm-error
+# 旧侧缺 Jackson：加载 Worker 时抛 NoClassDefFoundError（Error 而非 Exception），不得以 1（REVIEW）或静默结束
+run 3 scan --old-cp "$TMP/old-nojackson.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl"
+has 'result: ERROR'
+
 CASE=usage
 run 2 scan --old-cp "$TMP/old.cp" --sources "$TMP/clean.jsonl"
+run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok
+run 2 scan --old-cp --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl"
+run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok 2
+run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --max-gap-pct 5
 run 2 frobnicate
 
 # ---------- regex-scan.mjs / corpus-to-jsonl.mjs ----------

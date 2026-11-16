@@ -69,13 +69,13 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      # Catalog is just a generated TOML — building it validates the DSL
-      # and that publishing wiring is intact. No tests to run.
       # 门禁扫描 Java 侧（scripts/gate-scan/java-gate）：桩引擎覆盖各分组、缺语言包 / classpath 条目 / 截断导出 / 与 ts
       # 对账失败的退出码 3，以及 regex-scan / corpus-to-jsonl。Jackson 按固定版本与 SHA-256 从 Maven Central 下载。
       - name: java-gate regression test
         run: bash scripts/gate-scan/java-gate/java-gate.test.sh
 
+      # Catalog is just a generated TOML — building it validates the DSL
+      # and that publishing wiring is intact. No tests to run.
       - name: Build + verify catalog generates
         run: ./gradlew build generateCatalogAsToml
 
