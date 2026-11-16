@@ -52,6 +52,8 @@ jobs:
         run: bash .github/actions/require-main-ci-green/require-main-ci-green.test.sh
       - name: preflight main CI gate regression test
         run: bash scripts/release-plan/preflight-main-ci.test.sh
+      - name: verify-jar-contents regression test
+        run: bash .github/actions/verify-jar-contents/verify-jar-contents.test.sh
 
       # workflow 静态检查（review L12），钉死版本。
       - name: actionlint
