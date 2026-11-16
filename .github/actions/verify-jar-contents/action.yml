@@ -1,0 +1,33 @@
+name: Verify jar contents
+description: >
+  发布制品冒烟（ADR 0053 修订 A2）：发布 run 不再重跑测试后，确认要发布的 jar 存在、文件名版本与 tag 一致、
+  含有必需条目（如 SPI 的 META-INF/services/）。几秒钟。详见同目录 verify-jar-contents.sh 文件头。
+
+inputs:
+  jars:
+    description: 换行分隔的 glob（相对 working-directory），每条至少匹配一个主 jar
+    required: true
+  entries:
+    description: 换行分隔的 ERE，每个主 jar 对每条至少有一个条目匹配
+    required: false
+    default: '\.class$'
+  version:
+    description: 主 jar 文件名必须以 -<version>.jar 结尾（可直接传 vX 形式的 tag，开头的 v 会去掉）；空则不查
+    required: false
+    default: ''
+  working-directory:
+    description: 展开 glob 的目录
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Verify jar contents
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        JAR_GLOBS: ${{ inputs.jars }}
+        JAR_ENTRIES: ${{ inputs.entries }}
+        JAR_VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/verify-jar-contents.sh"

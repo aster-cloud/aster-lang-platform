@@ -21,6 +21,11 @@ on:
         description: 'release train 标识（审计用）'
         required: false
         type: string
+      forceTests:
+        description: '发布 run 跑完整测试而不要求 main CI 已通过（ADR 0053 修订 A2）'
+        required: false
+        type: boolean
+        default: false
 
 # dispatch(vX) 与 tag-push(vX) 用同一 concurrency group（inputs.version 不含 v 前缀，
 # 补 format 成 vX 对齐 ref_name），串行化同版本的 create-tag 与 publish。
@@ -44,6 +49,7 @@ jobs:
       - name: Create & push release tag
         env:
           VERSION: ${{ inputs.version }}
+          FORCE_TESTS: ${{ inputs.forceTests }}
         run: |
           PKG_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' build.gradle.kts | head -n1)
           if [ "$VERSION" != "$PKG_VERSION" ]; then
@@ -57,11 +63,21 @@ jobs:
           if git show-ref --verify --quiet "refs/tags/$TAG"; then
             TAG_SHA=$(git rev-list -n1 "$TAG"); HEAD_SHA=$(git rev-parse HEAD)
             if [ "$TAG_SHA" = "$HEAD_SHA" ]; then
+              # ADR 0053 修订 A2：tag 已在本 commit 上时 dispatch 是 no-op，tag 消息不会再变；本次要求 forceTests 而已有
+              # tag 不带标记，就明确失败，不让 forceTests 被静默忽略。
+              if [ "$FORCE_TESTS" = "true" ] && ! git cat-file -p "refs/tags/$TAG" | grep -qxF "release-gate: force-tests"; then
+                echo "::error::$TAG 已存在但不带 force-tests 标记，本次 forceTests=true 不会生效。该版本尚未发布时：删除远端 tag（git push origin :refs/tags/$TAG）后重新 dispatch；或让 main CI 变绿后重跑该 tag 的 publish run。"; exit 1
+              fi
               echo "::notice::$TAG already on this commit → no-op (idempotent)"; exit 0
             fi
             echo "::error::$TAG exists but points to $TAG_SHA, not HEAD $HEAD_SHA"; exit 1
           fi
-          git tag "$TAG"
+          # ADR 0053 修订 A2：forceTests 时打 annotated tag，消息带标记，tag-push 的发布 run 据此跑完整测试。
+          if [ "$FORCE_TESTS" = "true" ]; then
+            git tag -a "$TAG" -m "release-gate: force-tests"
+          else
+            git tag "$TAG"
+          fi
           git push origin "$TAG"
 
   publish:
@@ -71,8 +87,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # ADR 0053 修订 A2：门禁读本仓 CI run 与 job。
+      actions: read
     steps:
       - uses: actions/checkout@v6
+
+      # ADR 0053 修订 A2：发布的 commit 必须已在 main CI 上通过（本仓用本地路径，与 tag 同版本）。
+      # catalog 没有测试可跑，force-tests 对本仓只意味着跳过门禁。
+      - name: Require main CI green for this commit
+        uses: ./.github/actions/require-main-ci-green
 
       - uses: actions/setup-java@v5
         with:

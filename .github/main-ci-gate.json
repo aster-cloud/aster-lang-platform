@@ -1,0 +1,5 @@
+{
+  "$comment": "ADR 0053 修订 A2：发布本仓前要求 main CI 对该 commit 已通过的 workflow 与必需 job（= main 分支保护的必需检查）。改 ci.yml 的 job 名时同步改这里。",
+  "workflow": "ci.yml",
+  "requiredJobs": ["build"]
+}
