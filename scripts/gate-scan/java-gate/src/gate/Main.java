@@ -305,7 +305,7 @@ public final class Main {
      */
     static boolean sane(int javaOldSourcesOk, int tsOldSourcesOk, int maxGapPct) {
         int gap = Math.abs(javaOldSourcesOk - tsOldSourcesOk);
-        long allowed = Math.max(1, (long) tsOldSourcesOk * maxGapPct / 100);
+        long allowed = (long) tsOldSourcesOk * maxGapPct / 100; // 向下取整；--max-gap-pct 0 即要求严格相等
         String line = "sanity: old sources ok in any lexicon: java " + javaOldSourcesOk + " vs ts " + tsOldSourcesOk
             + " (gap " + gap + ", allowed " + allowed + " = " + maxGapPct + "%)";
         if (gap <= allowed) {

@@ -160,10 +160,14 @@ CASE=truncated-export
 jsonl "$TMP/trunc.jsonl" --count 5 'cloud:a='
 run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/trunc.jsonl"
 
+CASE=marker-not-last
+printf '%s\n' '{"_count" : 1}' '{"id":"cloud:z","kind":"cloud-policy","content":"Module m.SECRET_TEXT_z."}' >"$TMP/marker-first.jsonl"
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/marker-first.jsonl"
+
 CASE=sanity-ok
 printf 'old compiles: 5 ok, 0 threw, 7 not ok / 12 compiles\nold sources ok in any lexicon: 2 / 3\n' >"$TMP/ts-scan.txt"
 run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-scan "$TMP/ts-scan.txt"
-has 'sanity: old sources ok in any lexicon: java 2 vs ts 2 (gap 0, allowed 1 = 5%) — ok'
+has 'sanity: old sources ok in any lexicon: java 2 vs ts 2 (gap 0, allowed 0 = 5%) — ok'
 
 CASE=sanity-skipped
 run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl"

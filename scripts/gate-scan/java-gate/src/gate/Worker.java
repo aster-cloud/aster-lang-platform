@@ -29,12 +29,16 @@ public final class Worker {
     private Worker() {
     }
 
-    /** 读取导出 JSONL：返回 {id, kind, content}；校验末行完成标记 {"_count": N} 与行数一致。 */
+    /**
+     * 读取导出 JSONL：返回 {id, kind, content}。完成标记 {"_count": N} 必须恰好一个、位于最后一个非空行，且 N 等于行数；
+     * 否则视为截断或拼接损坏的导出。
+     */
     public static String[][] readSources(String path) throws Exception {
         List<String[]> rows = new ArrayList<>();
         Integer marker = null;
         for (String line : Files.readAllLines(Path.of(path))) {
             if (line.isBlank()) continue;
+            if (marker != null) throw new IllegalStateException(path + "：完成标记之后还有数据行（导出损坏）");
             JsonNode n = MAPPER.readTree(line);
             if (n.has("_count")) {
                 marker = n.get("_count").asInt();
