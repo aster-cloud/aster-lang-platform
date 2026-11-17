@@ -13,6 +13,10 @@ aster-lang-ts 构建编译一遍，报告编译结论发生变化的策略。报
 | `input-refs.mjs` | 列出档案模块每条 Verdict 规则的 `inputRefs`，标出 `*` / `""`，合入影响面并对账 |
 | `common.mjs` | `scan.mjs` 与 `input-refs.mjs` 共用：构建 / lexicon 加载、静默编译、导出校验、源计数 |
 | `gate-scan.test.sh` | 本地回归测试（假 kubectl + 假 ts 构建，不连集群；可选真实构建端到端） |
+| `java-gate/` | 补充扫描：Java 生产编译路径（aster-api InProcessCnlParser + TypeChecker）旧引擎 vs 新引擎，含 Core IR 差异，见下文 |
+| `ir-diff.mjs` | 补充扫描：两个 ts 构建上 `compileAndTypecheck` 的结论、类型诊断与规范 Core IR 差异 |
+| `regex-scan.mjs` | 补充扫描：按规则文件对导出逐行跑 PCRE 预筛，只打印 id / kind / 规则名 |
+| `corpus-to-jsonl.mjs` | 把 aster-lang-test 语料写成导出格式，供补充扫描在不碰生产数据的前提下自测 |
 
 ## 何时运行
 
@@ -220,6 +224,89 @@ result: STAR (1 STAR rules)
   动态 Map 键规则必须报 E708 `dynamic-map-key`（否则注入的注册表没生效，`construct` 不可信）。
 - 退出码 3 或 4 的结果不进入台账，先修导出或对账。
 
+## 补充扫描（引擎改动可能改变 IR，或只影响 Java 侧时）
+
+标准扫描只比较 ts `compile()` 的诊断码：看不见 Core IR 的变化，也看不见生产实际走的 Java 编译路径。aster-lang-core 的改动、
+或任何可能「诊断不变、IR 变了」的改动（标识符改名、规范化器改动、新 IR 节点），在标准扫描之外再跑下面三项。
+它们都只读导出文件（标准扫描加 `--keep` 保留导出），用完照常删除导出。
+
+### Java 门禁（`java-gate/`）
+
+生产编译走 aster-api 的 `InProcessCnlParser`（replay 模块）+ core 的 `TypeChecker`。门禁在一个 JVM 里给旧、新引擎各建一个
+隔离的 `URLClassLoader`（各自的 replay + core + truffle + 语言包），每份源在 en-US / zh-CN / de-DE / hi-IN 下各编译一次。
+
+```bash
+# 1. 每侧准备一个工作区：aster-api 检出，同级目录放好该侧的 aster-lang-core / -runtime / -truffle / -validation / -hi / -locales
+#    （aster-api 的 settings.gradle 会 composite 替换它们），然后构建 classpath（不改 aster-api 仓的文件）
+scripts/gate-scan/java-gate/java-gate.sh classpath --api ~/wt-gate-x/old/aster-api --out ~/wt-gate-x/old.cp
+scripts/gate-scan/java-gate/java-gate.sh classpath --api ~/wt-gate-x/new/aster-api --out ~/wt-gate-x/new.cp
+
+# 2. 标准扫描保留导出并留下输出，Java 门禁用它做对账
+scripts/gate-scan/gate-scan.sh scan --sources "$D" --keep --old-ts <旧> --new-ts <新> > ts-scan.txt
+scripts/gate-scan/java-gate/java-gate.sh scan --old-cp ~/wt-gate-x/old.cp --new-cp ~/wt-gate-x/new.cp \
+  --sources "$D/api.jsonl" --sources "$D/cloud.jsonl" --ts-scan ts-scan.txt
+```
+
+需要 JDK 25（`JAVA_HOME`，macOS 上缺省用 `java_home -v 25`）。分组：
+
+| 分组 | 含义 | 处理 |
+| --- | --- | --- |
+| `newly-failing` / `newly-failing-E064` | 旧版成功、新版失败（E064(',') 单列） | 必须处理 |
+| `throws` | 新版抛异常 | 必须处理 |
+| `changed-codes` | 成败不变、诊断码集合变了 | 逐个确认 |
+| `ir-changed-other` | 两侧都成功但 IR 有非列差异（改名、结构变化） | 逐个确认，改名类要核对请求输入字段 |
+| `ir-changed-cols-only` | IR 只在 `origin.*.col` 上不同 | 逐个确认（见下面「列抖动」） |
+| `newly-passing` / `ir-changed-expected` / `e064-prefilter-hits` | 信息项 | 确认即可 |
+
+退出码：`0` PASS；`1` REVIEW；`2` 用法错误；`3` 环境错误或结果不可信——只有 0 算通过。以下情况一律是 3：
+
+- **语言包预检失败**：任一侧没注册全部四个 lexicon。core 的 `LexiconRegistry` 经线程上下文类加载器（TCCL）上的 SPI 发现
+  zh / de / hi 语言包，门禁在每次反射调用前把 TCCL 设成该侧的类加载器。没设 TCCL 时只有 en-US：zh-CN / de-DE 全部 UNCODED
+  失败、hi-IN 静默回退 en-US——2026-11-17 之前本地的 Java 门禁一直如此，只扫过 en-US。
+- **与 ts 扫描对账失败**（`--ts-scan`，或 `--ts-old-sources-ok N --ts-sources-total M`）：ts 扫的源数 M 与本次不同
+  （不是同一份导出），或 Java 与 ts「旧版在任一 lexicon 下能编译的源数」差距超过 `--max-gap-pct`（缺省 5%）。
+  不给 ts 输出时打印 `sanity: SKIPPED`，只靠上面的语言包预检——发布列车门禁务必给 `--ts-scan`。这一项是第二道防线：
+  它只在「只能用 zh / de 编译的源」超过阈值时才能发现缺包，hi-IN 回退 en-US 时发现不了；第一道防线是预检。按源计而不按「源 × lexicon」计：Java 的 zh / de / hi 词法表回退 en-US，英文源在四个 lexicon 下
+  都能编译，逐 lexicon 的成功数两边天然不同（2026-11-17 生产：Java 344 vs ts 269 / 440，按源计两边都是 110 / 110）。
+- classpath 文件或其中任一条目不存在（`URLClassLoader` 会静默跳过缺失条目）、金丝雀源编译失败、导出完成标记缺失或不符。
+- JVM 异常结束：任何未捕获的 `Throwable`（含 `NoClassDefFoundError` 等 Error）、或退出码 0 / 1 却没有对应的 `result:` 行。
+
+调用引擎期间 `System.out` / `System.err` 指向空流，报告只含 id / kind / lexicon / 诊断码 / IR 键路径。
+
+**列抖动（aster-lang-core#281 之前）**：core 1.0.49 及更早的 `DynamicLexicon` 用 `Map.copyOf` 存关键词，遍历顺序随 JVM 进程变化；
+zh-CN 的「包含」同时是 TYPE_WITH 与 TYPE_HAS 的拼写，规范化时随机成 `with` 或 `has`，「包含」之后同一行的 IR 列差 1。
+两侧引擎各自随机，所以含「包含」的 zh 源会时有时无地出现在 `ir-changed-cols-only`（2026-11-17 生产 4 个 id，同一对
+classpath 连跑两次一次 PASS 一次 REVIEW）。旧引擎早于修复时，`ir-changed-cols-only` 里只有 zh-CN、重跑后消失或出现的条目
+按此归类；不能确定时用元数据探针比较同一引擎多个 JVM 进程下的「去列哈希」（不打印源码）。
+
+### ts ir-diff（`ir-diff.mjs`）
+
+```bash
+node scripts/gate-scan/ir-diff.mjs --old <ts 构建> --new <ts 构建> \
+  --sources "$D/api.jsonl" --sources "$D/cloud.jsonl" --allow-empty-api
+```
+
+旧版成功的每个 lexicon 上比较新版的 `compileAndTypecheck`：`newly-failing*`、`throws-on-new`、`typecheck-new-errors` 需复核
+（退出码 1），`ir-changed`（只列 IR 键名）、`typecheck-changed`、`e064-prefilter-hits` 为信息项。复用本目录的 `common.mjs`。
+
+### 正则预筛（`regex-scan.mjs`）
+
+```bash
+node scripts/gate-scan/regex-scan.mjs --rules rules.txt --sources "$D/api.jsonl" --sources "$D/cloud.jsonl"
+```
+
+规则文件每条两行：`# <规则名> <说明>` + 下一行 PCRE（规则名只含字母、数字、下划线）。规则取自该改动的 ADR / PR 列出的风险写法
+（如 ADR 0056 修订 A3 §6）。匹配交给系统 perl 逐行执行（与 `grep -P` 同语义），输出 `hit <id> <kind> <规则名>`；
+命中只是预筛，要与 Java / ts 的 IR 差异交叉核对。退出码 0 无命中、1 有命中、2 用法错误、3 规则 / 导出损坏或 perl 失败。
+
+### 先自测再信任生产结果
+
+每轮补充扫描先在 aster-lang-test 语料上跑一遍，再为本轮每个风险各写一份合成源，确认每个风险都能被检出：
+
+```bash
+node scripts/gate-scan/corpus-to-jsonl.mjs ~/IdeaProjects/aster-lang-test /tmp/corpus-export   # cloud.jsonl + 空 api.jsonl
+```
+
 ## 数据处理
 
 - SQL 在 `READ ONLY` 事务里执行，不写任何库；脚本不读取任何密钥（签发方导出不含公钥），依赖操作者已有的 kubectl 权限。
@@ -246,3 +333,14 @@ GATE_SCAN_TS_150=<v1.5.0 构建> GATE_SCAN_TS_140=<v1.4.0 构建> bash scripts/g
 
 input-refs 真实构建部分编译字面路径、动态 Map 键、`Profile "governed"` 三份源，期望恰两行、动态键行 `flags=STAR construct=dynamic-map-key`；
 1.5.0 之前的构建期望退出码 3。
+
+```bash
+bash scripts/gate-scan/java-gate/java-gate.test.sh   # Java 门禁 + regex-scan + corpus-to-jsonl（CI 中运行）
+JAVA_GATE_OLD_CP=<old.cp> JAVA_GATE_NEW_CP=<new.cp> JAVA_GATE_CORPUS=<aster-lang-test 根> bash scripts/gate-scan/java-gate/java-gate.test.sh
+```
+
+Java 门禁测试用 `java-gate/test/stub-engine` 的最小桩引擎（同名的 InProcessCnlParser / TypeChecker / CoreIrJson /
+LexiconRegistry，语言包经 TCCL 上的 SPI 发现，每个语言包一个 jar），覆盖：各分组（含只在 zh / de / hi 下出现的差异、
+只差列的 IR）、PASS、缺 zh 语言包 jar（退出码 3）、classpath 条目缺失、导出截断、与 ts 对账通过 / 差距过大、用法错误，
+并检查桩引擎故意打到 stdout / stderr / JUL 的源码不会出现在输出里。Worker 依赖的 Jackson 按固定版本与 SHA-256 从 Maven Central
+下载（`JAVA_GATE_JACKSON_DIR` 可指向已下载的目录）。

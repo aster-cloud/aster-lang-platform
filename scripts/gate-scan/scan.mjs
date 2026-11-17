@@ -165,7 +165,7 @@ function classify(runs, code) {
 const fmtOutcome = o => `{${o.codes.join(',')}}${o.ok ? '' : '!'}`;
 const fmtStats = s => `${s.ok} ok, ${s.threw} threw, ${s.attempts - s.ok} not ok / ${s.attempts} compiles`;
 
-function printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly }) {
+function printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly, oldAnyOk }) {
   const reported = [...groups.values()].reduce((n, list) => n + list.length, 0);
   console.log(`gate scan: old=${oldBuild.version} (${oldBuild.dist})`);
   console.log(`           new=${newBuild.version} (${newBuild.dist})`);
@@ -175,6 +175,9 @@ function printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly
   console.log(`scanned: ${sources.length} (${[...kinds].map(([k, n]) => `${k}=${n}`).join(', ') || 'none'})`);
   console.log(`old compiles: ${fmtStats(oldBuild.stats)}`);
   console.log(`new compiles: ${fmtStats(newBuild.stats)}`);
+  // 与 Java 门禁对账用（java-gate.sh --ts-scan）：按源计，不按「源 × lexicon」计——Java 的 zh / de / hi 词法表回退 en-US，
+  // 英文源在四个 lexicon 下都能编译，逐 lexicon 的成功数两边天然不同
+  console.log(`old sources ok in any lexicon: ${oldAnyOk} / ${sources.length}`);
   for (const [name, list] of groups) {
     console.log(`${name}: ${list.length}`);
     for (const item of list) console.log(`  ${item}`);
@@ -201,14 +204,17 @@ async function main() {
   for (const id of missing) groups.get('lexicons-missing-in-new').push(`${id} [lexicon] present in old, missing in new`);
 
   const kinds = new Map();
+  let oldAnyOk = 0;
   for (const row of sources) {
     kinds.set(row.kind, (kinds.get(row.kind) ?? 0) + 1);
-    const verdict = classify(compileAll(oldBuild, newBuild, row.content), args.code);
+    const runs = compileAll(oldBuild, newBuild, row.content);
+    if (runs.some(r => r.old.ok)) oldAnyOk++;
+    const verdict = classify(runs, args.code);
     if (!verdict) continue;
     const detail = verdict.shown.map(r => `${r.lexicon} old=${fmtOutcome(r.old)} new=${fmtOutcome(r.new)}`).join('; ');
     groups.get(verdict.group).push(`${row.id} [${row.kind}] ${detail}`);
   }
-  return printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly });
+  return printReport({ oldBuild, newBuild, args, sources, kinds, groups, newOnly, oldAnyOk });
 }
 
 await runMain('scan.mjs', main);

@@ -1,0 +1,18 @@
+// 列车门禁扫描（Java 侧）用的 Gradle init 脚本：不改 aster-api 仓的任何文件。
+// 给 :replay 加一个 printGateClasspath 任务：先构建 replay 及其（composite 替换后的）引擎依赖，
+// 再把 test 运行时类路径（含 main 输出、core、truffle、en/zh/de/hi 词法包）写到 -PgateCpOut 指定的文件。
+// 生产编译走 aster-api 的 InProcessCnlParser（replay 模块），所以扫描必须用同一份 replay 代码，
+// 并且按「旧引擎 / 新引擎」各自编译一次（replay 内联了 core 的编译期常量，如嵌套上限）。
+gradle.projectsEvaluated {
+    def replay = gradle.rootProject.findProject(':replay')
+    if (replay == null) return
+    replay.tasks.register('printGateClasspath') {
+        def cp = replay.sourceSets.test.runtimeClasspath
+        dependsOn cp
+        def out = replay.findProperty('gateCpOut')
+        doLast {
+            if (out == null) throw new GradleException('需要 -PgateCpOut=<文件>')
+            new File(out.toString()).text = cp.files.findAll { it.exists() }*.absolutePath.join(File.pathSeparator)
+        }
+    }
+}
