@@ -164,6 +164,21 @@ CASE=marker-not-last
 printf '%s\n' '{"_count" : 1}' '{"id":"cloud:z","kind":"cloud-policy","content":"Module m.SECRET_TEXT_z."}' >"$TMP/marker-first.jsonl"
 run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/marker-first.jsonl"
 
+CASE=marker-not-integer
+printf '%s\n' '{"id":"cloud:z","kind":"cloud-policy","content":"Module m.SECRET_TEXT_z."}' '{"_count" : 1.9}' >"$TMP/marker-float.jsonl"
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/marker-float.jsonl"
+printf '%s\n' '{"id":"cloud:z","kind":"cloud-policy","content":"Module m.SECRET_TEXT_z."}' '{"_count" : "1"}' >"$TMP/marker-str.jsonl"
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/marker-str.jsonl"
+
+CASE=marker-duplicate
+printf '%s\n' '{"id":"cloud:z","kind":"cloud-policy","content":"Module m.SECRET_TEXT_z."}' '{"_count" : 1}' '{"_count" : 1}' >"$TMP/marker-dup.jsonl"
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/marker-dup.jsonl"
+
+CASE=sanity-strict-zero
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok 3 --ts-sources-total 3 --max-gap-pct 0
+has 'gap 1, allowed 0 = 0%'
+run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok 2 --ts-sources-total 3 --max-gap-pct 0
+
 CASE=sanity-ok
 printf 'old compiles: 5 ok, 0 threw, 7 not ok / 12 compiles\nold sources ok in any lexicon: 2 / 3\n' >"$TMP/ts-scan.txt"
 run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-scan "$TMP/ts-scan.txt"

@@ -41,7 +41,12 @@ public final class Worker {
             if (marker != null) throw new IllegalStateException(path + "：完成标记之后还有数据行（导出损坏）");
             JsonNode n = MAPPER.readTree(line);
             if (n.has("_count")) {
-                marker = n.get("_count").asInt();
+                JsonNode c = n.get("_count");
+                // 只收整数节点：asInt() 会把 1.9 / "1" 之类宽松转换成 1
+                if (!c.isIntegralNumber() || !c.canConvertToInt() || c.intValue() < 0) {
+                    throw new IllegalStateException(path + "：完成标记 _count 不是非负整数（导出损坏）");
+                }
+                marker = c.intValue();
                 continue;
             }
             rows.add(new String[] {n.get("id").asText(), n.get("kind").asText(), n.get("content").asText()});
