@@ -18,52 +18,97 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  # 只动仓库文档（docs/**、仓库级 *.md、LICENSE 等）时跳过下面 build 的全部步骤，判定见
+  # .github/actions/docs-only（本仓用本地路径，其它仓用 @main）。
+  # ★build 是分支保护的必需检查，也是 .github/main-ci-gate.json 的 requiredJobs：发布门禁
+  #   require-main-ci-green 把 skipped 判为不通过，所以 docs-only 时 build **照跑、只跳过步骤**，
+  #   job 结论仍是 success。不要改成 job 级 if（会变 skipped，main 上的 docs 提交就发不了版）。
+  # push 的比较基准是「最近一次 build 真正跑完」的 main commit（基线），不是 push 的 before：
+  #   代码提交红了之后紧跟的 docs 提交，diff 里仍含那次代码 → 完整运行，不会空跑变绿让门禁放行。
+  changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read      # 读历史 run 的步骤结论（push 基线）
+    outputs:
+      docs-only: ${{ steps.docs.outputs.docs-only }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions/docs-only
+      - id: docs
+        uses: ./.github/actions/docs-only
+        with:
+          baseline-workflow: ci.yml
+          baseline-jobs: |
+            ^build$ :: Build + verify catalog generates
+
+  build:
+    needs: changes
+    # changes 失败时输出为空 → 步骤照常执行（fail-safe：探测故障绝不跳过测试）。
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        uses: actions/checkout@v6
 
       # 防漂移 gate（ADR 0023 阶段6）：本仓即 plan/script 所在，直接对自身 root 校验
       # platform artifact（self version == platformVersion）。
-      - uses: actions/setup-python@v6
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        uses: actions/setup-python@v6
         with: { python-version: '3.12' }
-      - name: Release-plan drift gate
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: Release-plan drift gate
         run: |
           python3 scripts/release-plan/check-artifact.py \
             --plan release-plan.json --artifact platform --repo-root .
 
       # 发布列车执行器的回归测试（issue #85）：只依赖 bash + jq，gh/npm 由测试内 shim 顶替。
-      - name: run-train.sh regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: run-train.sh regression test
         run: bash scripts/release-plan/run-train.test.sh
 
       # ADR 0053：层内并行 / stale gate / deploy run 关联 / train manifest / cleanup 的回归测试。
-      - name: train artifact-reuse regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: train artifact-reuse regression test
         run: bash scripts/release-plan/train-reuse.test.sh
 
       # ADR 0053 修订 A1：drift gate 的 pinOwner=train 语义（表驱动）与列车阶段 P/D（开 PR、复用、
       # 超时重跑一次、strict 拒绝合并、跟随 push deploy、dry-run 只读、续跑幂等）的回归测试。
-      - name: check-artifact pinOwner regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: check-artifact pinOwner regression test
         run: bash scripts/release-plan/check-artifact.test.sh
-      - name: train aster-api pin regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: train aster-api pin regression test
         run: bash scripts/release-plan/train-api-pin.test.sh
 
       # ADR 0053 修订 A2：共享发布门禁 require-main-ci-green 与列车 preflight main CI 检查的回归测试。
-      - name: require-main-ci-green regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: require-main-ci-green regression test
         run: bash .github/actions/require-main-ci-green/require-main-ci-green.test.sh
-      - name: preflight main CI gate regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: preflight main CI gate regression test
         run: bash scripts/release-plan/preflight-main-ci.test.sh
-      - name: verify-jar-contents regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: verify-jar-contents regression test
         run: bash .github/actions/verify-jar-contents/verify-jar-contents.test.sh
+      # 共享 docs-only 判定（分类、PR 区间、push 基线、fail-safe）的回归测试。
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: docs-only regression test
+        run: bash .github/actions/docs-only/docs-only.test.sh
 
       # workflow 静态检查（review L12），钉死版本。
-      - name: actionlint
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 "$RUNNER_TEMP"
           # -shellcheck= ：只校验 workflow 结构/表达式。托管 runner 自带 shellcheck，会把各 workflow
           # 既有的 info 级提示（SC2086 等）也判失败——那是另一项治理，不在本门禁范围。
           "$RUNNER_TEMP/actionlint" -color -shellcheck=
 
-      - uses: actions/setup-java@v5
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        uses: actions/setup-java@v5
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -71,13 +116,21 @@ jobs:
 
       # 门禁扫描 Java 侧（scripts/gate-scan/java-gate）：桩引擎覆盖各分组、缺语言包 / classpath 条目 / 截断导出 / 与 ts
       # 对账失败的退出码 3，以及 regex-scan / corpus-to-jsonl。Jackson 按固定版本与 SHA-256 从 Maven Central 下载。
-      - name: java-gate regression test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: java-gate regression test
         run: bash scripts/gate-scan/java-gate/java-gate.test.sh
 
       # Catalog is just a generated TOML — building it validates the DSL
       # and that publishing wiring is intact. No tests to run.
-      - name: Build + verify catalog generates
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: Build + verify catalog generates
         run: ./gradlew build generateCatalogAsToml
 
-      - name: Show generated catalog
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: Show generated catalog
         run: cat build/version-catalog/libs.versions.toml
+
+      # docs-only 时 build 只剩这一步：让「为什么没构建」在日志里可见。
+      - if: ${{ needs.changes.outputs.docs-only == 'true' }}
+        name: Docs-only — 跳过构建与测试
+        run: echo "只动了仓库文档，按设计跳过构建与测试（build 仍以 success 收尾，满足必需检查与发布门禁）"

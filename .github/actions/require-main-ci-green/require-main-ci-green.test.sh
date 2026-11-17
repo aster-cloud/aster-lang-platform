@@ -110,6 +110,15 @@ fx "$RUNS_EP" "$(runs "$(run 10 completed success 1)")"
 fx "$(jobs_ep 10)" "$(jobs build=success 'test (24)=skipped')"
 gate; expect_rc 1; expect_err "test (24)=skipped"
 
+# 2b. docs-only（.github/actions/docs-only 的约定）：必需 job 照跑、只跳过重活步骤 → job 结论 success → 放行；
+#     其它非必需 job 被 job 级跳过（skipped）不告警。若哪个仓把必需 job 做成 job 级跳过，就落到上面
+#     第 2 条（skipped 不算通过）——门禁拦下，而不是放过一次没测过的发布。
+newcase docs-only
+fx "$RUNS_EP" "$(runs "$(run 10 completed success 1)")"
+fx "$(jobs_ep 10)" "$(jobs changes=success build=success 'test (24)=success' 'Strict tier1 parity=skipped')"
+gate; expect_rc 0; expect_out "run-id=10"
+grep -qF "::warning::" "$FIX/.stderr" && fail "docs-only 时非必需 job skipped 不应告警"
+
 # 3. 必需 job 缺失（改名、条件未满足）不算通过；重名也不算。
 newcase missing
 fx "$RUNS_EP" "$(runs "$(run 10 completed success 1)")"
