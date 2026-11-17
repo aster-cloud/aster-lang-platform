@@ -1,0 +1,95 @@
+name: Docs-only change detector
+description: >
+  判定本次变更是否只动了仓库文档（docs/**、仓库级 *.md、LICENSE、.github/ISSUE_TEMPLATE/** 等），
+  供各仓 CI / 部署 workflow 跳过构建、测试、镜像与部署。判定规则、比较区间与基线见同目录 docs-only.sh 文件头。
+
+  用法约定（各仓必须遵守，否则会卡合并或拦发布）：
+    - 不要用 workflow 级 paths-ignore 跳过产出必需检查的 workflow；workflow 照常触发，
+      第一个 job 调本 action，重活按 `docs-only` 输出跳过；
+    - 分支保护登记的必需检查、以及 .github/main-ci-gate.json 的 requiredJobs，在 docs-only 时
+      仍必须以 **success** 收尾（发布门禁 require-main-ci-green 把 skipped 判为不通过）——
+      做法是 job 照跑、只跳过其中的重活步骤，或由汇总 job 把「因 docs-only 而 skipped」判为通过；
+    - push / workflow_run 必须配基线（baseline-workflow + baseline-jobs），否则一律完整运行；
+      baseline-jobs 列出的 job / 步骤必须是 docs-only 时会被跳过的那些（否则空跑的 run 会被当成基线）。
+
+  调用方 job 需要 `permissions: contents: read`；用基线时再加 `actions: read`。
+
+inputs:
+  token:
+    description: 有本仓 contents:read（基线模式再加 actions:read）的 token
+    required: false
+    default: ${{ github.token }}
+  repository:
+    description: owner/name
+    required: false
+    default: ${{ github.repository }}
+  extra-docs:
+    description: 换行分隔，追加算作文档的 glob（`*` 可跨越 `/`）
+    required: false
+    default: ''
+  non-docs:
+    description: 换行分隔，绝不算文档的 glob（优先于文档模式）：随制品发布的文件、被测试 / 构建读取的 markdown 等
+    required: false
+    default: ''
+  baseline-workflow:
+    description: push / workflow_run 的比较基线所在 workflow 文件名（如 ci.yml）；空 = 这两类事件一律完整运行
+    required: false
+    default: ''
+  baseline-jobs:
+    description: >-
+      换行分隔，基线 run 必须同时满足的每一行：`<job 名 ERE>`（该 job 成功）或
+      `<job 名 ERE> :: <步骤名>`（该 job 里这一步也成功）。ERE 整名匹配请写 ^…$
+    required: false
+    default: ''
+  baseline-max-runs:
+    description: 最多回看多少个已完成的基线 run
+    required: false
+    default: '30'
+  baseline-sha-from:
+    description: >-
+      基线 commit 取自 run 的 head_sha（缺省）或 title（run 标题里最后一个 40 位 SHA）。workflow_run 触发的
+      run 的 head_sha 是触发时默认分支的 tip，不一定是它实际处理的 commit——这类 workflow 用 run-name 写出
+      实际 commit，并在这里填 title
+    required: false
+    default: head_sha
+  base:
+    description: 覆盖推导出的比较基准（compare 认的写法，如 SHA 或 `<sha>~1`）；一般留空
+    required: false
+    default: ''
+  head:
+    description: 覆盖推导出的比较终点；一般留空
+    required: false
+    default: ''
+
+outputs:
+  docs-only:
+    description: "'true' = 只动了文档，可跳过重活；其余情况一律 'false'"
+    value: ${{ steps.detect.outputs.docs-only }}
+  base:
+    description: 实际使用的比较基准
+    value: ${{ steps.detect.outputs.base }}
+  head:
+    description: 实际使用的比较终点
+    value: ${{ steps.detect.outputs.head }}
+  reason:
+    description: 判定理由（人读）
+    value: ${{ steps.detect.outputs.reason }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect docs-only change
+      id: detect
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        DOCS_REPO: ${{ inputs.repository }}
+        EXTRA_DOCS: ${{ inputs.extra-docs }}
+        NON_DOCS: ${{ inputs.non-docs }}
+        BASELINE_WORKFLOW: ${{ inputs.baseline-workflow }}
+        BASELINE_JOBS: ${{ inputs.baseline-jobs }}
+        BASELINE_MAX_RUNS: ${{ inputs.baseline-max-runs }}
+        BASELINE_SHA_FROM: ${{ inputs.baseline-sha-from }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+      run: bash "$GITHUB_ACTION_PATH/docs-only.sh"
