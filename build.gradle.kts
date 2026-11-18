@@ -298,7 +298,20 @@ group = "cloud.aster-lang"
 //   ADR 0046 §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。runtime / validation / truffle 源码无变更，
 //   lockstep 重新打 tag。
 //
-version = "1.0.49"
+// 1.0.50：ADR 0059 策略包导出（P1 / P2 E1）与两组双引擎 parity 修正。core：生产编译路径进公共包 aster.core.embed
+//   （#280）；大写规则名 / 字段名报 E055、USE 大小写不敏感、_ 开头标识符报 E050、X of A 后的裸小写名字报 E055（#278，
+//   ts#334）；zh「包含」固定规范化成 with，IR 不再随 JVM 进程变化（#281）；词法空白只认 ASCII 的 parity 夹具（#283，
+//   ts#348）；登记导出码 E730–E735、E737–E739（#284）。truffle：生产值编解码与沙箱执行器进公共包 aster.truffle.embed
+//   （#184）、导出 builtin 白名单（#186）、JVM aster CLI 子项目与 fat jar / 启动脚本 Release 资产（#185 #187 #189–#192），
+//   内置信任锚改为生产导出公钥 export-2026-11a（#193）。locales / hi：导出码的 zh / de / hi-IN 译文与共享码表（#144、
+//   #108，只改 Maven overlay 与测试基线，ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，幂等 skip）。test：ts#334 /
+//   ts#348 的 tier1 与必拒样本（#215 #225）——npm 包只新增语料样本，test:npm 2.3.0 → 2.4.0；包格式 v1 一致性夹具
+//   （#216–#223 #227）与 CoreIrEvalCli 修正（#224）不进 npm 包。ts npm 3.3.0（包格式 v1 的 aster CLI 与单文件 runner、./layout /
+//   ./runner / ./package-check 子路径、导出码、ts#334 / ts#348 parity 的新拒绝写法；公开声明只增不删，按 ADR 0046
+//   §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。platform：gate-scan 工具入库（#131）、docs-only 判定 action
+//   （#132）。runtime / validation 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.50"
 
 catalog {
     versionCatalog {
@@ -314,7 +327,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.49")
+        version("asterLang", "1.0.50")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
