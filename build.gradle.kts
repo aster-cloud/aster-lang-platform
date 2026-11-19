@@ -311,7 +311,17 @@ group = "cloud.aster-lang"
 //   §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。platform：gate-scan 工具入库（#131）、docs-only 判定 action
 //   （#132）。runtime / validation 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.50"
+// 1.0.51：双引擎 parity 修正与 LSP 词汇修复。core：引号归一只改写字符串定界符，字符串字面量里的弯引号原样保留、
+//   "abc” 不再被当作闭合（报未闭合字符串）；字面量宏值的 \ 与 " 转义后展开（#287，ts#347 / ts#345）；
+//   SemanticTokenKind.CATEGORIES 按书写顺序遍历，LexiconExporter 导出的 categories 不再随 JVM 进程变化（#286，#282）。
+//   locales：zh 令…定义为 变换器的空白只认空格、\t 与 U+3000，绑定不跨行（#146，locales#143；只改 Maven 模块，
+//   ui-messages 1.0.31 无变更，幂等 skip）。test：上述三项的 tier1 与必拒样本（#229）——npm 包只新增语料样本，
+//   test:npm 2.4.0 → 2.5.0。ts npm 3.4.0（ts#361 引号 / 字面量宏与 core 同规则、ts#363 CLI / LSP 依赖改回
+//   dependencies、ts#366 LSP 对 en-US 文档应用租户词汇；公开导出不变，但 "abc” 这类既有源码新报 error 级诊断，
+//   按 ADR 0046 §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。platform / runtime / validation / hi / truffle
+//   源码无变更，lockstep 重新打 tag；ui-messages-hi 1.0.24 无变更，幂等 skip。
+//
+version = "1.0.51"
 
 catalog {
     versionCatalog {
@@ -327,7 +337,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.50")
+        version("asterLang", "1.0.51")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
