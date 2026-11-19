@@ -321,7 +321,16 @@ group = "cloud.aster-lang"
 //   按 ADR 0046 §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。platform / runtime / validation / hi / truffle
 //   源码无变更，lockstep 重新打 tag；ui-messages-hi 1.0.24 无变更，幂等 skip。
 //
-version = "1.0.51"
+// 1.0.52：别名校验 v2（ADR 0060，aster-cloud#830）。core：UserAliasValidator v2——zh 下 2–8 个汉字的单词别名放行、
+//   FUNC_PRODUCE 入结构词档、别名不得等于字面量宏触发词；新码 E808 ALIAS_IDENTIFIER_COLLISION（别名名字守卫：
+//   AST 名字折叠后等于汉字单词别名或被别名化 kind 的英文拼写即失败）；《静夜思》原诗证明（#291）。locales / hi：
+//   E808 的 zh / de / hi-IN 译文与共享码表 136 码（#149、#111，只改 Maven overlay 与测试基线，ui-messages 1.0.31、
+//   ui-messages-hi 1.0.24 无变更，幂等 skip）。test：envelope 共享向量 envelope.literal-macro（#231）——npm 包只追加
+//   语料向量，test:npm 2.5.0 → 2.6.0。ts npm 3.5.0（ts#369 与 core 同规则的别名校验 v2 与 E808；新 error 级诊断、
+//   既有别名集新拒绝，./browser 的 CompileOptions 新增 astGuard，按 ADR 0046 §11.7 第 11 条取 minor）由本次列车
+//   ts:npm 层发布。platform / runtime / validation / truffle 源码无变更，lockstep 重新打 tag。
+//
+version = "1.0.52"
 
 catalog {
     versionCatalog {
@@ -337,7 +346,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.51")
+        version("asterLang", "1.0.52")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
