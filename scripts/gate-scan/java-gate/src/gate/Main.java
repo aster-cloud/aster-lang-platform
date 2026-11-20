@@ -219,9 +219,9 @@ public final class Main {
         OUT.println("sources: " + kinds);
         OUT.println("parser: old=" + call(oldSide, oldSide.parser()) + " new=" + call(newSide, newSide.parser()));
         // 别名集（export --with-vocab 的 vocab.jsonl，按 id 对上源码）：有别名集的源再按冻结版本的别名路径各编译一遍
-        Map<String, String> aliasSets = new HashMap<>();
+        Map<String, String[]> aliasSets = new HashMap<>();
         for (String f : args.aliases()) {
-            for (String[] a : (String[][]) call(newSide, newSide.readAliases(), f)) aliasSets.put(a[0], a[1]);
+            for (String[] a : (String[][]) call(newSide, newSide.readAliases(), f)) aliasSets.put(a[0], a);
         }
         if (!args.aliases().isEmpty()) {
             long matched = rows.stream().filter(r -> aliasSets.containsKey(r[0])).count();
@@ -260,8 +260,10 @@ public final class Main {
                 stats[4]++;
                 compare(id + " [" + kind + "] " + lex, oldRes.get(lex), newRes.get(lex), groups, histogram);
             }
-            String aliasSet = aliasSets.get(id);
-            if (aliasSet == null) continue;
+            String[] alias = aliasSets.get(id);
+            if (alias == null) continue;
+            String aliasSet = alias[1];
+            String ownLexicon = lexiconOf(alias[2]);
             // 别名路径单独计数、单独打标签（kind+aliasSet），不进上面的 compiles / sanity 统计（ts 扫描不带别名集）
             Map<String, String[]> oldAl = new LinkedHashMap<>();
             Map<String, String[]> newAl = new LinkedHashMap<>();
@@ -269,7 +271,9 @@ public final class Main {
                 oldAl.put(lex, oldSide.run(src, lex, aliasSet));
                 newAl.put(lex, newSide.run(src, lex, aliasSet));
             }
-            for (String lex : pickLexicons(oldAl, newAl)) {
+            // 导出知道该版本的编译语言时只比它：别名是按语言生效的（汉字单词别名只在 zh 下进守卫与归因），
+            // 旧版在所有语言下都失败时 pickLexicons 只比 en-US，会漏掉 zh 下「解析错误 → E808」的归因变化
+            for (String lex : ownLexicon != null ? List.of(ownLexicon) : pickLexicons(oldAl, newAl)) {
                 stats[7]++;
                 compare(id + " [" + kind + "+aliasSet] " + lex, oldAl.get(lex), newAl.get(lex), groups, histogram);
             }
@@ -325,6 +329,14 @@ public final class Main {
         if (other.isEmpty()) groups.get("ir-changed-expected").add(tag + " nodes=" + expected.size());
         else if (other.stream().allMatch(p -> COL_PATH.matcher(p).find())) groups.get("ir-changed-cols-only").add(tag + " paths=" + other);
         else groups.get("ir-changed-other").add(tag + " paths=" + other);
+    }
+
+    /** 导出的编译语言 → LEXICONS 中的同一项（大小写不敏感）；未知或不受支持时为 null。 */
+    private static String lexiconOf(String lexicon) {
+        for (String lex : LEXICONS) {
+            if (lex.equalsIgnoreCase(lexicon)) return lex;
+        }
+        return null;
     }
 
     /** 通过了解析、名称解析与降级（类型检查错误不算失败）：与 ts compile() 的「成功」口径一致。 */

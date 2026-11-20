@@ -65,7 +65,8 @@ public final class Worker {
     }
 
     /**
-     * 读取 {@code export --with-vocab} 的 vocab.jsonl（export-vocab.sql）：返回有别名集的行 {id, aliasSet 原文}。
+     * 读取 {@code export --with-vocab} 的 vocab.jsonl（export-vocab.sql）：返回有别名集的行 {id, aliasSet 原文, lexicon}
+     * （lexicon 为导出反推的编译语言，未知时为空串）。
      * 完成标记的校验与 {@link #readSources} 相同；aliasSet 为 null / 空串的行（词条、快照、无别名集的版本）跳过。
      */
     public static String[][] readAliasSets(String path) throws Exception {
@@ -88,7 +89,8 @@ public final class Worker {
             JsonNode id = n.get("id");
             JsonNode aliasSet = n.get("aliasSet");
             if (id == null || !id.isTextual() || aliasSet == null || !aliasSet.isTextual() || aliasSet.asText().isBlank()) continue;
-            rows.add(new String[] {id.asText(), aliasSet.asText()});
+            JsonNode lexicon = n.get("lexicon");
+            rows.add(new String[] {id.asText(), aliasSet.asText(), lexicon != null && lexicon.isTextual() ? lexicon.asText() : ""});
         }
         if (marker == null || marker != total) {
             throw new IllegalStateException(path + "：完成标记缺失或与行数不符（marker=" + marker + "，rows=" + total + "）");

@@ -167,23 +167,27 @@ hasnt 'alias-path compared'
 
 CASE=alias-path
 # 别名路径：只有 vocab 导出里有别名集的源再走 parseWithUserAliases；newalias 指令只在别名路径上生效
-jsonl "$TMP/al.jsonl" 'cloudv:al=[newalias:E808]' 'cloudv:plain=[newalias:E808]' 'cloudv:bad=' 'api:al2='
+jsonl "$TMP/al.jsonl" 'cloudv:al=[newalias:E808]' 'cloudv:plain=[newalias:E808]' 'cloudv:bad=' 'api:al2=' \
+  'cloudv:attr=[all:E055][newalias@zh-CN:E808]'
 printf '%s\n' \
   '{"id":"cloudv:al","kind":"cloud-policy-version","aliasSet":"{\"RETURN\":[\"SECRET_TEXT_a\"]}"}' \
+  '{"id":"cloudv:attr","kind":"cloud-policy-version","lexicon":"zh-CN","aliasSet":"{\"RETURN\":[\"SECRET_TEXT_d\"]}"}' \
   '{"id":"cloudv:bad","kind":"cloud-policy-version","aliasSet":"{not json SECRET_TEXT_b"}' \
   '{"id":"api:al2","kind":"api-policy-version","aliasSet":"{\"IF\":[\"SECRET_TEXT_c\"]}"}' \
   '{"id":"cloudterm:t","kind":"cloud-term","aliasSet":null}' \
-  '{"_count" : 4}' >"$TMP/vocab.jsonl"
+  '{"_count" : 5}' >"$TMP/vocab.jsonl"
 run 1 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new-embed.cp" --sources "$TMP/al.jsonl" --aliases "$TMP/vocab.jsonl"
-has 'alias sets: 3 in vocab export, 3 matched a source'
-has 'compiles: old ok 16 / new ok 16 / 16 (source × lexicon); compared 16'
-has 'alias-path compared: 9'
+has 'alias sets: 4 in vocab export, 4 matched a source'
+has 'compiles: old ok 16 / new ok 16 / 20 (source × lexicon); compared 17'
+has 'alias-path compared: 10'
+# 旧版全语言失败的源：按导出的 lexicon（zh-CN）比较，看得见归因带来的诊断码变化（不靠 pickLexicons 的 en-US）
+has 'cloudv:attr [cloud-policy-version+aliasSet] zh-CN old=parse{E055:error} new=parse{E055:error,E808:error}'
 has 'newly-failing: 4'
 has 'cloudv:al [cloud-policy-version+aliasSet] zh-CN old=ok{} new=parse{E808:error}'
 hasnt 'cloudv:plain'
 hasnt 'cloudv:bad'
 hasnt 'api:al2'
-has 'result: REVIEW (4 need review;'
+has 'result: REVIEW (5 need review;'
 # 不带 --aliases：同一批源只走普通路径，全部一致
 run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new-embed.cp" --sources "$TMP/al.jsonl"
 

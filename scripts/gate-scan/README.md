@@ -244,7 +244,8 @@ result: STAR (1 STAR rules)
 **别名路径（`--aliases`）**：E808 别名名字守卫（ADR 0060 §5.3）与解析失败归因只在带别名集的编译上发生（aster-api 执行已存版本时
 `parseWithUserAliases(source, locale, scopes, aliasSet, true)` 复验冻结的别名集）。给出 `export --with-vocab` 的
 `api-vocab.jsonl` / `cloud-vocab.jsonl` 时，id 对得上且有别名集的源再按这条路径各编译一遍（词汇作用域两侧都传 null），
-结果以 `[<kind>+aliasSet]` 标签进入同样的分组；别名集原文不可读时两侧都记 `unreadable-aliasSet`（vocab-check 另行报告）。
+结果以 `[<kind>+aliasSet]` 标签进入同样的分组；导出给出该版本的 `lexicon` 时只比较那一个语言（别名按语言生效：汉字单词别名
+只在 zh 下进守卫与归因，否则旧版全失败的源只比 en-US，会漏掉「解析错误 → E808」的归因变化），未知时按普通路径的规则选语言；别名集原文不可读时两侧都记 `unreadable-aliasSet`（vocab-check 另行报告）。
 别名路径不进 `compiles` / sanity 统计（ts 扫描不带别名集），只另打一行 `alias-path compared: N`。
 
 ```bash
