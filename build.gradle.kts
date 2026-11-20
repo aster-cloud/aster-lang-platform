@@ -330,7 +330,21 @@ group = "cloud.aster-lang"
 //   既有别名集新拒绝，./browser 的 CompileOptions 新增 astGuard，按 ADR 0046 §11.7 第 11 条取 minor）由本次列车
 //   ts:npm 层发布。platform / runtime / validation / truffle 源码无变更，lockstep 重新打 tag。
 //
-version = "1.0.52"
+// 1.0.53：策略包显示排版（ADR 0059 修订 4）与 Wave B 双引擎 parity 修正。core：纯 Java aster.core.layout——包格式 1.1
+//   排版规则 L1–L9 与反向映射（#297），UserAliasValidator.operatorKinds()；类型别名引导词 TYPE_ALIAS（#301，ADR 0058
+//   修订 2）；字面量触发词与关键词同形时关键词优先（#299，ADR 0060 修订 1）；字面量宏内容允许 \、" 与弯引号（#300）；
+//   裸小写类型名与歧义分隔符报 E055、规则体 / If 块头后可空行（#302，ADR 0056 修订 A4）；W709 识别名字前的 @pii（#296）；
+//   规范化后为空的源码按空源码拒绝（#295）；ANTLR 工具链不再进运行时 classpath 与发布的 pom（#294）。truffle：JVM aster
+//   CLI 包格式 1.1——show、run --display、verify 的 display / display-ir（#198）。locales / hi：TYPE_ALIAS 拼写（#153、
+//   #114），zh 函数头与 结果为 只认词法空白（#152；只改 Maven 模块，ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，
+//   幂等 skip）。test：Wave B 的 tier1 正例与必拒样本（#236 #237 #239–#242）——npm 包只新增语料样本，test:npm
+//   2.6.0 → 2.7.0；包格式 1.1 显示排版真相源（#234）与 package-v1 夹具（#235）不进 npm 包。ts npm 3.6.0（包格式 1.1 的
+//   show / run --display 与 ./layout 包规则（#373）、TYPE_ALIAS 与上述 parity 修正；公开声明只增不删，既有源码新报
+//   error 级诊断，按 ADR 0046 §11.7 第 11 条取 minor）由本次列车 ts:npm 层发布。platform：共享 setup-gradle-cached
+//   与列车 api-parity 预检（#139）、gate-scan --with-vocab 与 vocab-check（#140）。runtime / validation 源码无变更，
+//   lockstep 重新打 tag。
+//
+version = "1.0.53"
 
 catalog {
     versionCatalog {
@@ -346,7 +360,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.52")
+        version("asterLang", "1.0.53")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
