@@ -64,6 +64,18 @@ mkjar "$TMP/w/b/build/libs/b-1.0.49.jar" README
 run $'a/build/libs/*.jar\nb/build/libs/*.jar' '\.class$' 1.0.49
 [ "$rc" = 1 ] || fail "任一 jar 不合格即失败"
 
+newcase test-fixtures-ignored
+mkjar "$TMP/w/build/libs/x-1.0.49.jar" aster/lang/En.class META-INF/services/aster.Spi
+mkjar "$TMP/w/build/libs/x-1.0.49-test-fixtures.jar" aster/lang/Hooks.class
+run 'build/libs/*.jar' "$SPI" v1.0.49
+[ "$rc" = 0 ] || fail "-test-fixtures jar 应被忽略，rc=$rc"
+grep -q '1 个 jar 通过' "$TMP/out" || fail "应只检查 1 个主 jar（忽略 -test-fixtures）"
+
+newcase only-test-fixtures
+mkjar "$TMP/w/build/libs/x-1.0.49-test-fixtures.jar" aster/lang/Hooks.class
+run 'build/libs/*.jar' '\.class$' 1.0.49
+[ "$rc" = 1 ] || fail "只有 -test-fixtures jar 应失败"; grep -q '没有匹配到任何主 jar' "$TMP/out" || fail "应说明没有主 jar"
+
 newcase empty-inputs
 run '' '\.class$'; [ "$rc" = 1 ] || fail "空 JAR_GLOBS 应失败"
 run 'x/*.jar' ''; [ "$rc" = 1 ] || fail "空 JAR_ENTRIES 应失败"
