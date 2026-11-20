@@ -1,0 +1,142 @@
+name: Setup JDK + Gradle dependency cache
+description: >
+  装 JDK，按构建文件恢复 Gradle 依赖缓存（先恢复、再让 Gradle 解析），并把 gradle-retry.sh / gradle-version.sh
+  加进 PATH（aster-lang-platform#138）。供各引擎仓 release workflow 的 create-tag / publish 使用。
+
+  为什么需要：create-tag 原来只装 JDK、不带任何 Gradle 缓存，每次在冷 runner 上从 Maven Central 解析 platform 与本仓的
+  构建插件依赖（例如 core 的 jmh 插件拉 jmh-core）。列车同一层的各仓 release 并行启动，请求叠加，eco-1.0.52 的 core
+  create-tag 因此 429（run 44616501131），版本解析读成空串，误报成版本不一致，列车停在第 1 层。
+
+  用法（调用方 job 必须在本 action 之前完成全部 checkout：缓存键按此刻工作区里的构建文件计算）：
+
+    - uses: aster-cloud/aster-lang-platform/.github/actions/setup-gradle-cached@main
+      with:
+        cache-group: release
+    - run: cd aster-lang-platform && gradle-retry.sh ./gradlew publishToMavenLocal
+    - run: |
+        RESOLVED=$(gradle-version.sh)          # Gradle 失败或读不到版本时本步失败，不会得到空串
+        RESOLVED=$(gradle-version.sh packages/jvm)
+        RESOLVED=$(gradle-version.sh . :en:properties)
+
+  两个脚本的语义见各自文件头。
+
+inputs:
+  java-version:
+    description: JDK 主版本
+    required: false
+    default: '25'
+  java-distribution:
+    description: JDK 发行版
+    required: false
+    default: temurin
+  cache:
+    description: >-
+      Gradle 缓存方式。
+      dependencies（缺省）：本 action 的分组缓存，见下方 runs 段注释；
+      setup-java：交给 actions/setup-java 的 `cache: gradle`。tag 触发的 publish job 用它——它的键只由构建文件决定，
+      与同仓 main CI 里检出布局相同的 job 一致，tag run 能精确命中 main CI 写下的完整依赖缓存（实测 runtime / validation /
+      locales / hi / truffle 的 1.0.52 publish 都命中），换成分组缓存反而只能回落到 create-tag 写的子集；
+      none：不缓存（调用方另有缓存，例如 gradle/actions/setup-gradle）。
+    required: false
+    default: dependencies
+  cache-group:
+    description: >-
+      cache=dependencies 时的分组名：解析同一依赖配置的 job 填同一个组名，共用一条缓存；留空则按 workflow + job 单独一条。
+      解析的依赖集不同的 job 不要同组：先写入的 job 若只解析了子集，同组其他 job 会精确命中这条残缺缓存，
+      每次再去 Maven Central 补下载（wontlost-ltd/aster-api#563）。
+    required: false
+    default: ''
+
+outputs:
+  cache-key:
+    description: cache=dependencies 时的依赖缓存主键（其余方式为空）
+    value: ${{ steps.key.outputs.key }}
+  cache-hit:
+    description: cache=dependencies 时主键是否精确命中（'true' / 'false'；按前缀回落时为 'false'）
+    value: ${{ steps.restore-ro.outputs.cache-hit || steps.restore-rw.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        CACHE_MODE: ${{ inputs.cache }}
+      run: |
+        case "$CACHE_MODE" in
+          dependencies|setup-java|none) ;;
+          *) echo "::error::setup-gradle-cached: cache 只能是 dependencies / setup-java / none，得到 '$CACHE_MODE'"; exit 1 ;;
+        esac
+
+    - uses: actions/setup-java@v5
+      with:
+        java-version: ${{ inputs.java-version }}
+        distribution: ${{ inputs.java-distribution }}
+        cache: ${{ inputs.cache == 'setup-java' && 'gradle' || '' }}
+
+    # cache=dependencies：分组缓存 ~/.gradle/caches，做法与 wontlost-ltd/aster-api#574 的 setup-aster-build 相同。
+    #   - 键 = 分组前缀 + 工作区内全部构建输入的哈希（本仓与已检出兄弟仓的 *.gradle* / gradle.properties / 版本目录 /
+    #     wrapper 属性 / buildSrc）。platform 的版本目录每次发版都变，所以每趟列车是新键；恢复按前缀回落到同组最新一条，
+    #     只补下载差量——这就是「先恢复」：Gradle 解析之前缓存已就位。
+    #   - 只有默认分支上的非 PR run 读写（列车 dispatch 的 create-tag 跑在 main）；PR 与 tag run 只读。PR / tag 作用域
+    #     的条目别的 ref 读不到，写了只占配额、挤掉 main 的条目；它们照样能读 main 作用域的条目。
+    #   - Gradle 发行版（~/.gradle/wrapper，由 gradle-wrapper.properties 唯一决定）单独一条、全部 job 共用，同样只在 main 上写。
+    #   - actions/cache 只在 job 成功时保存：半途 429 失败的 run 不会留下残缺条目。
+    #
+    # 容量估算（GitHub 每仓 10GB，超出按最近访问 LRU 淘汰，7 天未访问自动删除；各仓各自计算）：
+    #   create-tag 只解析 platform 与本仓的构建脚本类路径（插件），每仓一条约 0.1–0.3GB，wrapper 约 0.28GB（aster-api 实测；
+    #   与 main CI 里 setup-java 的 wrapper 条目各存一份）。每趟列车每仓新增一条，旧条目闲置后 7 天自动删除；最坏情况一周 7 趟列车约 2GB，
+    #   与 main CI 现有条目合计仍远低于 10GB。
+    - name: Compute Gradle cache key
+      id: key
+      if: ${{ inputs.cache == 'dependencies' }}
+      shell: bash
+      env:
+        GROUP: ${{ inputs.cache-group != '' && format('group-{0}', inputs.cache-group) || format('job-{0}-{1}', github.workflow, github.job) }}
+        BUILD_INPUTS_HASH: ${{ hashFiles('**/*.gradle*', '**/gradle.properties', '**/gradle/*.versions.toml', '**/gradle-wrapper.properties', '**/versions.properties', '**/buildSrc/**') }}
+        # 只有默认分支上的非 PR run 写缓存，见上。
+        WRITE: ${{ github.event_name != 'pull_request' && github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch }}
+      run: |
+        prefix="gradle-${RUNNER_OS}-${RUNNER_ARCH}-${GROUP}-"
+        {
+          echo "prefix=${prefix}"
+          echo "key=${prefix}${BUILD_INPUTS_HASH}"
+          echo "write=${WRITE}"
+        } >> "$GITHUB_OUTPUT"
+        echo "Gradle dependency cache key: ${prefix}${BUILD_INPUTS_HASH}（写入：${WRITE}）"
+
+    - name: Restore Gradle dependency cache (read-only)
+      id: restore-ro
+      if: ${{ inputs.cache == 'dependencies' && steps.key.outputs.write != 'true' }}
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.gradle/caches
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+
+    - name: Restore and save Gradle dependency cache
+      id: restore-rw
+      if: ${{ inputs.cache == 'dependencies' && steps.key.outputs.write == 'true' }}
+      uses: actions/cache@v6
+      with:
+        path: ~/.gradle/caches
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+
+    - name: Restore Gradle wrapper distributions (read-only)
+      if: ${{ inputs.cache == 'dependencies' && steps.key.outputs.write != 'true' }}
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.gradle/wrapper
+        key: gradle-wrapper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/gradle-wrapper.properties') }}
+
+    - name: Restore and save Gradle wrapper distributions
+      if: ${{ inputs.cache == 'dependencies' && steps.key.outputs.write == 'true' }}
+      uses: actions/cache@v6
+      with:
+        path: ~/.gradle/wrapper
+        key: gradle-wrapper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/gradle-wrapper.properties') }}
+
+    - name: Put gradle-retry.sh / gradle-version.sh on PATH
+      shell: bash
+      run: echo "$GITHUB_ACTION_PATH" >> "$GITHUB_PATH"

@@ -93,6 +93,10 @@ jobs:
       - if: ${{ needs.changes.outputs.docs-only != 'true' }}
         name: verify-jar-contents regression test
         run: bash .github/actions/verify-jar-contents/verify-jar-contents.test.sh
+      # 共享 setup-gradle-cached 的 429 退避重试与版本解析（aster-lang-platform#138）的回归测试。
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: setup-gradle-cached regression test
+        run: bash .github/actions/setup-gradle-cached/setup-gradle-cached.test.sh
       # 共享 docs-only 判定（分类、PR 区间、push 基线、fail-safe）的回归测试。
       - if: ${{ needs.changes.outputs.docs-only != 'true' }}
         name: docs-only regression test

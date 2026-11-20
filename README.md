@@ -141,7 +141,8 @@ CI 的 drift gate（`.github/workflows/ci.yml`）断言 `build.gradle.kts` 的 `
    检查绿后合并，再跟随该合并的 push deploy。需要专用 GitHub App，配置见
    [docs/runbooks/train-pin-app.md](docs/runbooks/train-pin-app.md)；缺省 `human` 时维持上面的手工流程。
 6. 在本仓 Actions 手动运行 **Release Train**（`release-train.yml`）：先 `dryRun=true`
-   看计划与 preflight，再 `dryRun=false` 真发。列车按 `releaseOrder` 逐层发布：
+   看计划、preflight 与 api-parity（aster-api 的跨引擎 parity 测试对着候选引擎 main 跑，红了列车不启动，
+   wontlost-ltd/aster-api#578），再 `dryRun=false` 真发。列车按 `releaseOrder` 逐层发布：
    platform → {core, runtime, validation, test} → {locales, hi} → truffle → {ts, aster-api}；
    每步 dispatch 目标仓 `release.yml` 建 tag → 等 tag-push publish run → 等制品在
    registry 可见。forward-only，失败即停，可用 `fromLayer` 续跑。
