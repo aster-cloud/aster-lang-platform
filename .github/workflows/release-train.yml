@@ -7,6 +7,9 @@
 # 等 tag-push release run 完成 → 等制品 registry 可见 → 进下一层。失败即停（forward-only，
 # 已发布制品不回收）。dryRun 只打印计划不真发。
 #
+# 开车前（dryRun 与真发都跑）：preflight（全仓 drift gate + main CI 门禁）→ api-parity（aster-api 的跨引擎 parity
+# 测试对着 preflight 验过的候选 main SHA 跑，wontlost-ltd/aster-api#578）。任一失败，train 不启动。
+#
 # ADR 0053 修订 A1：release-plan 里 pinOwner=train 的 service（aster-api）由列车在 L4 先 bump
 # platform pin（开 PR → 等必需检查 → 合并）再部署。所需 GitHub App 凭据（repo variable
 # TRAIN_PIN_APP_CLIENT_ID + secret TRAIN_PIN_APP_PRIVATE_KEY）见 docs/runbooks/train-pin-app.md。
@@ -201,8 +204,229 @@ jobs:
           echo "$DIFF"
           { echo '```diff'; echo "$DIFF"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-  train:
+  # wontlost-ltd/aster-api#578：开车前用**候选**引擎（preflight 验过的各仓 main SHA）跑 aster-api 的跨引擎 parity 测试，
+  # dryRun 与真发都跑，失败则 train 不启动、一个制品都不发。
+  #
+  # 为什么放在这里：aster-api main 平时只对着已发布的 pin 测（setup-aster-build 的 sibling-ref = pin），core / ts PR 新增的
+  # 共享夹具用例要等列车 L4 开 pin PR 才第一次碰到 aster-api——那时 L0–L3 的制品都已发布、只能前进修复（eco-1.0.50 的
+  # #576 因 ParseDiagnosticsParityTest 的 U+3000 用例在 L4 失败，修复是 aster-api#577）。放进列车而不是 aster-api nightly：
+  # nightly 红了不拦任何东西、测的也不一定是列车要发的 SHA；这里测的正是 stale gate 钉住的那组 SHA，并且直接卡住 train。
+  #
+  # 做法与列车 L4 的 pin PR 等价：兄弟目录检出候选引擎（aster-api 的 composite includeBuild 用源码替换 core / runtime /
+  # truffle / validation / hi / locales 制品），bump-api-pin.py 把 aster-api 的 platform pin 改成本次 platformVersion
+  # （与 L4 提交的 diff 相同），platform 发布到本 runner 的 Maven Local，再按 aster-api CI unit job 的环境只跑下面列出的测试。
+  # 耗时约 10 分钟（冷编译 core / truffle / aster-api + 一次 Quarkus 启动），与 preflight 串行，train 本身多为小时级。
+  api-parity:
     needs: [plan, preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    # 与 aster-api ci-build.yml 的 unit job 相同：@QuarkusTest（JreCliGoldenGateTest、PackageConformanceReferenceTest）连
+    # localhost:5432 / 6379。
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aster_policy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # 要跑的 aster-api 测试（Gradle --tests 过滤式，一行一个）。每一行都必须至少产出一份测试结果，否则判失败
+      # （类改名 / 删除不会让门禁静默变空）。
+      #   ParseDiagnosticsParityTest / BlankSourceParityTest：共享 parse 诊断夹具（读兄弟 core 的权威副本）与空白源码判定；
+      #   UserAlias*：用户别名校验与编译（ADR 0060）；*Envelope*：源码 / 版本信封；
+      #   JreCliGoldenGateTest：aster-api 导出包 ≡ 候选 truffle 构建的 jre CLI；
+      #   PackageConformanceReferenceTest / PackageV1FixtureCopyTest：导出包过候选 aster-lang-test 的参照检查，
+      #   以及 aster-api 的 package-v1 夹具副本与候选 test main 逐字节一致（不一致时同步副本与 SOURCE.md）。
+      PARITY_TESTS: |-
+        io.aster.policy.parser.ParseDiagnosticsParityTest
+        io.aster.policy.parser.BlankSourceParityTest
+        io.aster.policy.parser.UserAlias*
+        io.aster.policy.*Envelope*
+        io.aster.policy.export.JreCliGoldenGateTest
+        io.aster.policy.export.PackageConformanceReferenceTest
+        io.aster.policy.export.PackageV1FixtureCopyTest
+    steps:
+      # 候选 = preflight drift gate 验过、train 的 stale gate 也据此拦截的各仓 main SHA。缺任何一个仓即失败（不回落 main）。
+      - name: Resolve candidate SHAs (from preflight)
+        id: refs
+        env:
+          MAIN_SHAS: ${{ needs.preflight.outputs.main_shas }}
+        run: |
+          set -euo pipefail
+          { echo '### aster-api parity 的候选引擎'; echo '| repo | main SHA |'; echo '|---|---|'; } >> "$GITHUB_STEP_SUMMARY"
+          for r in aster-lang-platform aster-api aster-lang-core aster-lang-runtime aster-lang-truffle \
+                   aster-lang-validation aster-lang-locales aster-lang-hi aster-lang-test; do
+            sha=$(jq -r --arg r "$r" '.[$r] // empty' <<<"$MAIN_SHAS")
+            [ -n "$sha" ] || { echo "::error::preflight 的 main_shas 里没有 $r（release-plan 未列出该仓？）"; exit 1; }
+            echo "$r=$sha" >> "$GITHUB_OUTPUT"
+            echo "| $r | \`$sha\` |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/checkout@v6
+        with:
+          path: aster-lang-platform
+          ref: ${{ steps.refs.outputs.aster-lang-platform }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: wontlost-ltd/aster-api
+          path: aster-api
+          ref: ${{ steps.refs.outputs.aster-api }}
+          token: ${{ secrets.CROSS_REPO_TOKEN_WONTLOST }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-core
+          path: aster-lang-core
+          ref: ${{ steps.refs.outputs.aster-lang-core }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-runtime
+          path: aster-lang-runtime
+          ref: ${{ steps.refs.outputs.aster-lang-runtime }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-truffle
+          path: aster-lang-truffle
+          ref: ${{ steps.refs.outputs.aster-lang-truffle }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-validation
+          path: aster-lang-validation
+          ref: ${{ steps.refs.outputs.aster-lang-validation }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-locales
+          path: aster-lang-locales
+          ref: ${{ steps.refs.outputs.aster-lang-locales }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-hi
+          path: aster-lang-hi
+          ref: ${{ steps.refs.outputs.aster-lang-hi }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+      # package-v1 参照检查与夹具副本比对读兄弟 aster-lang-test（ASTER_LANG_TEST_DIR 缺省 ../aster-lang-test）。
+      - uses: actions/checkout@v6
+        with:
+          repository: aster-cloud/aster-lang-test
+          path: aster-lang-test
+          ref: ${{ steps.refs.outputs.aster-lang-test }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+          persist-credentials: false
+
+      # 与 L4 pin PR 同一份 diff（ADR 0053 修订 A1）：pin 已是目标版本时原样写回，不产生改动。
+      - name: Point aster-api at the candidate platform version
+        run: |
+          set -euo pipefail
+          TARGET=$(jq -r '.platformVersion' aster-lang-platform/release-plan.json)
+          python3 aster-lang-platform/scripts/release-plan/bump-api-pin.py --repo-root aster-api --write "$TARGET"
+
+      # 全部检出之后再算缓存键（键含各仓构建文件）。列车 dispatch 跑在 main，读写本组缓存。
+      - name: Setup JDK + Gradle dependency cache
+        uses: ./aster-lang-platform/.github/actions/setup-gradle-cached
+        with:
+          cache-group: api-parity
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Publish candidate version catalog to Maven Local
+        working-directory: aster-lang-platform
+        run: gradle-retry.sh ./gradlew publishToMavenLocal
+
+      # 依赖解析集中在这一步（限流时退避重试）；下面的测试步骤只剩运行期依赖。
+      # jre CLI fat jar 经 aster-api 的 composite 构建（与 aster-api CI unit job 相同）。
+      - name: Build candidate jre CLI + aster-api test classes
+        id: cli-jar
+        working-directory: aster-api
+        run: |
+          set -euo pipefail
+          gradle-retry.sh ./gradlew :aster-lang-truffle:cli:shadowJar :testClasses
+          jar=$(ls "$GITHUB_WORKSPACE"/aster-lang-truffle/cli/build/libs/aster-cli-*.jar)
+          test "$(echo "$jar" | wc -l)" -eq 1
+          echo "jar=$jar" >> "$GITHUB_OUTPUT"
+
+      - name: aster-api parity tests against candidate engines
+        working-directory: aster-api
+        env:
+          CLI_JAR: ${{ steps.cli-jar.outputs.jar }}
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          # 参照检查与黄金门必须实际执行：兄弟检出 / node / CLI jar 缺失即失败，而不是跳过。
+          ASTER_EXPORT_REFERENCE_REQUIRE: "1"
+          ASTER_EXPORT_GOLDEN_REQUIRE_JAR: "1"
+          DB_JDBC_URL: "jdbc:postgresql://localhost:5432/aster_policy"
+          DB_REACTIVE_URL: "postgresql://localhost:5432/aster_policy"
+          DB_USERNAME: "postgres"
+          DB_PASSWORD: "postgres"
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r t; do [ -z "$t" ] || args+=(--tests "$t"); done <<<"$PARITY_TESTS"
+          ./gradlew :test "${args[@]}" "-Daster.cli.jar=${CLI_JAR}"
+
+      # 每个过滤式都必须命中至少一个测试类（JUnit XML 文件名是 TEST-<类全名>.xml）。
+      - name: Every parity filter ran
+        working-directory: aster-api/build/test-results/test
+        run: |
+          set -euo pipefail
+          miss=0
+          while IFS= read -r t; do
+            [ -n "$t" ] || continue
+            pat="TEST-${t}.xml"
+            if compgen -G "$pat" >/dev/null; then
+              echo "✅ $t → $(compgen -G "$pat" | sed 's/^TEST-//; s/\.xml$//' | paste -sd, -)"
+            else
+              echo "::error::parity 过滤式 '$t' 没有执行任何测试类（被改名或删除？同步更新 release-train.yml 的 PARITY_TESTS）"; miss=1
+            fi
+          done <<<"$PARITY_TESTS"
+          [ "$miss" = 0 ]
+
+      - name: Summarize failed tests
+        if: failure()
+        working-directory: aster-api
+        continue-on-error: true
+        run: python3 scripts/ci/summarize-failed-tests.py build/test-results >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test results
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-parity-test-results
+          path: aster-api/build/test-results
+          retention-days: 7
+
+  train:
+    needs: [plan, preflight, api-parity]
     runs-on: ubuntu-latest
     # packages:read 让内置 GITHUB_TOKEN 能读本 org 的 GH Packages versions（可见性查询）。
     permissions:
