@@ -344,7 +344,16 @@ group = "cloud.aster-lang"
 //   与列车 api-parity 预检（#139）、gate-scan --with-vocab 与 vocab-check（#140）。runtime / validation 源码无变更，
 //   lockstep 重新打 tag。
 //
-version = "1.0.53"
+// 1.0.54：请求级解析额度迁入 core（aster-api#489，解阻 aster-api 删除解析器副本）。core：aster.core.embed.ParseBudget
+//   新增公开的 withinRequestAllowance(Duration, Work) 与 Work 接口（请求级额度栈，按默认预算发起的解析在结束时计入额度，
+//   E808 归因探测共用额度剩余），InProcessCnlParser 接入；CnlError 诊断渲染测试从 aster-api 迁入（#304）。公开 API 只增；
+//   未传额度时行为与 1.0.53 相同。platform：gate-scan java-gate 按侧选解析器（aster-api 删除副本后回落 core）与
+//   --aliases（#143），verify-jar-contents 忽略 -test-fixtures 附属 jar（#142）。test：package-v1 CI 固定 ts v3.6.0、
+//   删除 pending-ts-release.json、开启 --strict-formats（#244；只改 CI、conformance/ 与 scripts/，不进 npm / jvm 包，
+//   test:npm 2.7.0 无变更）。runtime / validation / locales / hi / truffle 源码无变更，lockstep 重新打 tag；ts npm 3.6.0
+//   （v3.6.0 后 main 无提交）、ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，本次不发布。
+//
+version = "1.0.54"
 
 catalog {
     versionCatalog {
@@ -360,7 +369,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.53")
+        version("asterLang", "1.0.54")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
