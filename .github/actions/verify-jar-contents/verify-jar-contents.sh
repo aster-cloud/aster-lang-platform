@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 发布制品冒烟（ADR 0053 修订 A2）：发布 run 不再跑测试后，用几秒钟确认「要发布的 jar 本身」没坏。
 # 测试跑的是 class 目录，从来不看 jar；这里补上的是 jar 级别的检查：
-#   - 每个 glob 至少匹配到一个主 jar（忽略 -sources / -javadoc / -plain）；
+#   - 每个 glob 至少匹配到一个主 jar（忽略 -sources / -javadoc / -plain / -test-fixtures 等附属 jar：
+#     java-test-fixtures 插件产出的 -test-fixtures.jar 是测试夹具，不含主 jar 的必需条目，也不按主 jar 校验）；
 #   - 给了 JAR_VERSION 时，主 jar 文件名必须以 -<version>.jar 结尾（与 tag 版本一致）；
 #   - 每个主 jar 对 JAR_ENTRIES 中的每条 ERE 至少有一个条目匹配（如 SPI 的 META-INF/services/）。
 #
@@ -38,7 +39,7 @@ while IFS= read -r glob; do
   # glob 由调用方给定、相对当前目录；不加引号让 shell 展开，未匹配时保持原样被下面的 -f 过滤掉。
   for jar in $glob; do
     [ -f "$jar" ] || continue
-    case "$jar" in *-sources.jar|*-javadoc.jar|*-plain.jar) continue ;; esac
+    case "$jar" in *-sources.jar|*-javadoc.jar|*-plain.jar|*-test-fixtures.jar) continue ;; esac
     found=1 checked=$((checked+1))
     if [ -n "$VERSION" ] && [[ "$jar" != *"-$VERSION.jar" ]]; then
       echo "::error::[verify-jar-contents] $jar 的文件名与版本 $VERSION 不符" >&2; fail=1; continue
