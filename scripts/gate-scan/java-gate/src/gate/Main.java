@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -62,7 +63,8 @@ public final class Main {
     }
 
     /** 一侧引擎：隔离类加载器里的 Worker 方法句柄。 */
-    private record Side(String label, ClassLoader loader, Method compile, Method diff, Method read, Method lexicons) {
+    private record Side(String label, ClassLoader loader, Method compile, Method diff, Method read, Method lexicons,
+                        Method readAliases, Method parser) {
         static Side load(String label, Path cpFile, URL self) throws Exception {
             if (!Files.isRegularFile(cpFile)) throw new IllegalStateException(label + " 侧 classpath 文件不存在：" + cpFile);
             List<URL> urls = new ArrayList<>();
@@ -76,13 +78,19 @@ public final class Main {
             }
             ClassLoader cl = new URLClassLoader(label, urls.toArray(new URL[0]), ClassLoader.getPlatformClassLoader());
             Class<?> w = Class.forName("gate.Worker", true, cl);
-            return new Side(label, cl, w.getMethod("compile", String.class, String.class),
+            return new Side(label, cl, w.getMethod("compile", String.class, String.class, String.class),
                 w.getMethod("diffIr", String.class, String.class), w.getMethod("readSources", String.class),
-                w.getMethod("registeredLexicons"));
+                w.getMethod("registeredLexicons"), w.getMethod("readAliasSets", String.class),
+                w.getMethod("parserClass"));
         }
 
         String[] run(String source, String lexicon) throws Exception {
-            return (String[]) call(this, compile, source, lexicon);
+            return run(source, lexicon, null);
+        }
+
+        /** aliasSet 非空时走冻结版本的别名路径（parseWithUserAliases，见 Worker#compile）。 */
+        String[] run(String source, String lexicon, String aliasSet) throws Exception {
+            return (String[]) call(this, compile, source, lexicon, aliasSet);
         }
     }
 
@@ -105,12 +113,13 @@ public final class Main {
     }
 
     /** 命令行参数。 */
-    private record Args(String oldCp, String newCp, List<String> sources, Integer tsOldSourcesOk, Integer tsSourcesTotal,
-                        int maxGapPct) {
+    private record Args(String oldCp, String newCp, List<String> sources, List<String> aliases, Integer tsOldSourcesOk,
+                        Integer tsSourcesTotal, int maxGapPct) {
         static Args parse(String[] argv) {
             String oldCp = null;
             String newCp = null;
             List<String> sources = new ArrayList<>();
+            List<String> aliases = new ArrayList<>();
             Integer tsOldOk = null;
             Integer tsTotal = null;
             Integer maxGap = null;
@@ -121,6 +130,7 @@ public final class Main {
                     case "--old-cp" -> oldCp = value;
                     case "--new-cp" -> newCp = value;
                     case "--sources" -> sources.add(value);
+                    case "--aliases" -> aliases.add(value);
                     case "--ts-old-sources-ok" -> tsOldOk = parseCount(value);
                     case "--ts-sources-total" -> tsTotal = parseCount(value);
                     case "--max-gap-pct" -> maxGap = parseCount(value);
@@ -134,7 +144,7 @@ public final class Main {
             if ((tsOldOk == null) != (tsTotal == null) || (maxGap != null && tsOldOk == null)) {
                 throw new IllegalArgumentException("--ts-old-sources-ok 与 --ts-sources-total 须同时给出；--max-gap-pct 只能与它们一起用");
             }
-            return new Args(oldCp, newCp, sources, tsOldOk, tsTotal, maxGap == null ? DEFAULT_MAX_GAP_PCT : maxGap);
+            return new Args(oldCp, newCp, sources, aliases, tsOldOk, tsTotal, maxGap == null ? DEFAULT_MAX_GAP_PCT : maxGap);
         }
 
         private static int parseCount(String s) {
@@ -158,7 +168,7 @@ public final class Main {
         } catch (IllegalArgumentException e) {
             ERR.println(e.getMessage());
             ERR.println("用法：gate.Main --old-cp <文件> --new-cp <文件> --sources <jsonl> [--sources …] "
-                + "[--ts-old-sources-ok N --ts-sources-total M [--max-gap-pct P]]");
+                + "[--aliases <vocab.jsonl> …] [--ts-old-sources-ok N --ts-sources-total M [--max-gap-pct P]]");
             System.exit(2);
             return;
         }
@@ -207,6 +217,16 @@ public final class Main {
         Map<String, Integer> kinds = new TreeMap<>();
         rows.forEach(r -> kinds.merge(r[1], 1, Integer::sum));
         OUT.println("sources: " + kinds);
+        OUT.println("parser: old=" + call(oldSide, oldSide.parser()) + " new=" + call(newSide, newSide.parser()));
+        // 别名集（export --with-vocab 的 vocab.jsonl，按 id 对上源码）：有别名集的源再按冻结版本的别名路径各编译一遍
+        Map<String, String> aliasSets = new HashMap<>();
+        for (String f : args.aliases()) {
+            for (String[] a : (String[][]) call(newSide, newSide.readAliases(), f)) aliasSets.put(a[0], a[1]);
+        }
+        if (!args.aliases().isEmpty()) {
+            long matched = rows.stream().filter(r -> aliasSets.containsKey(r[0])).count();
+            OUT.println("alias sets: " + aliasSets.size() + " in vocab export, " + matched + " matched a source");
+        }
 
         Map<String, List<String>> groups = new LinkedHashMap<>();
         for (String g : List.of("newly-failing-E064", "newly-failing", "throws", "changed-codes", "ir-changed-other",
@@ -215,7 +235,8 @@ public final class Main {
         }
         Map<String, Integer> histogram = new TreeMap<>();
         // 0 旧 ok，1 新 ok，2 旧过前端（ok + typecheck），3 新过前端，4 比较次数，5 编译总数，6 旧版在任一 lexicon 下过前端的源数
-        int[] stats = new int[7];
+        // 7 别名路径的比较次数
+        int[] stats = new int[8];
         for (String[] row : rows) {
             String id = row[0];
             String kind = row[1];
@@ -239,13 +260,27 @@ public final class Main {
                 stats[4]++;
                 compare(id + " [" + kind + "] " + lex, oldRes.get(lex), newRes.get(lex), groups, histogram);
             }
+            String aliasSet = aliasSets.get(id);
+            if (aliasSet == null) continue;
+            // 别名路径单独计数、单独打标签（kind+aliasSet），不进上面的 compiles / sanity 统计（ts 扫描不带别名集）
+            Map<String, String[]> oldAl = new LinkedHashMap<>();
+            Map<String, String[]> newAl = new LinkedHashMap<>();
+            for (String lex : LEXICONS) {
+                oldAl.put(lex, oldSide.run(src, lex, aliasSet));
+                newAl.put(lex, newSide.run(src, lex, aliasSet));
+            }
+            for (String lex : pickLexicons(oldAl, newAl)) {
+                stats[7]++;
+                compare(id + " [" + kind + "+aliasSet] " + lex, oldAl.get(lex), newAl.get(lex), groups, histogram);
+            }
         }
-        OUT.println("gate scan (java): old/new engine via aster-api InProcessCnlParser + TypeChecker");
+        OUT.println("gate scan (java): old/new engine via aster-api production parser (see parser:) + TypeChecker");
         OUT.println("lexicons: " + String.join(", ", LEXICONS));
         OUT.printf("compiles: old ok %d / new ok %d / %d (source × lexicon); compared %d%n",
             stats[0], stats[1], stats[5], stats[4]);
         OUT.printf("front-end ok (ok + typecheck): old %d / new %d; old sources ok in any lexicon: %d / %d%n",
             stats[2], stats[3], stats[6], rows.size());
+        if (!args.aliases().isEmpty()) OUT.printf("alias-path compared: %d%n", stats[7]);
         for (Map.Entry<String, List<String>> g : groups.entrySet()) {
             OUT.println(g.getKey() + ": " + g.getValue().size());
             g.getValue().forEach(l -> OUT.println("  " + l));

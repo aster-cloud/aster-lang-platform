@@ -63,6 +63,17 @@ for lex in zh-CN de-DE hi-IN; do
   "$JH/bin/javac" -d "$d" -cp "$TMP/stub-classes" "$d/stub/lex/$cls.java"
   "$JH/bin/jar" --create --file "$TMP/lex-$lex.jar" -C "$d" stub -C "$d" META-INF
 done
+# core 内嵌解析器桩：把 aster-api 副本桩改包名为 aster.core.embed，jar 里去掉 io/aster/policy/parser（aster-api A1 之后的形态）
+mkdir -p "$TMP/embed-src" "$TMP/core-classes"
+for f in InProcessCnlParser CnlErrorListener; do
+  sed 's/^package io\.aster\.policy\.parser;/package aster.core.embed;/' \
+    "$HERE/test/stub-engine/io/aster/policy/parser/$f.java" >"$TMP/embed-src/$f.java"
+done
+"$JH/bin/javac" -encoding UTF-8 -d "$TMP/embed-classes" -cp "$TMP/stub-classes" "$TMP/embed-src/"*.java
+cp -R "$TMP/stub-classes/." "$TMP/core-classes/"
+rm -rf "$TMP/core-classes/io"
+cp -R "$TMP/embed-classes/." "$TMP/core-classes/"
+"$JH/bin/jar" --create --file "$TMP/engine-new-embed.jar" -C "$TMP/core-classes" . -C "$TMP/res-new" stub-build.txt
 mkcp() {  # 输出文件 build 语言包…
   local out="$1" build="$2"; shift 2
   local cp="$TMP/engine-$build.jar:$JACKSON_CP" lex
@@ -72,6 +83,7 @@ mkcp() {  # 输出文件 build 语言包…
 mkcp "$TMP/old.cp" old zh-CN de-DE hi-IN
 mkcp "$TMP/new.cp" new zh-CN de-DE hi-IN
 mkcp "$TMP/new-nozh.cp" new de-DE hi-IN
+mkcp "$TMP/new-embed.cp" new-embed zh-CN de-DE hi-IN
 printf '%s' "$TMP/engine-old.jar:$TMP/lex-zh-CN.jar:$TMP/lex-de-DE.jar:$TMP/lex-hi-IN.jar" >"$TMP/old-nojackson.cp"
 
 # ---------- 合成导出 ----------
@@ -146,6 +158,39 @@ has 'compiles: old ok 5 / new ok 5 / 12 (source × lexicon); compared 6'
 has 'front-end ok (ok + typecheck): old 5 / new 5; old sources ok in any lexicon: 2 / 3'
 has 'result: PASS (0 need review;'
 
+CASE=core-embed-fallback
+# 新侧没有 aster-api 副本：回落 core 的 aster.core.embed.InProcessCnlParser，并在输出里写明两侧各用哪个
+run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new-embed.cp" --sources "$TMP/api.jsonl" --sources "$TMP/clean.jsonl"
+has 'parser: old=io.aster.policy.parser.InProcessCnlParser new=aster.core.embed.InProcessCnlParser'
+has 'compiles: old ok 5 / new ok 5 / 12 (source × lexicon); compared 6'
+hasnt 'alias-path compared'
+
+CASE=alias-path
+# 别名路径：只有 vocab 导出里有别名集的源再走 parseWithUserAliases；newalias 指令只在别名路径上生效
+jsonl "$TMP/al.jsonl" 'cloudv:al=[newalias:E808]' 'cloudv:plain=[newalias:E808]' 'cloudv:bad=' 'api:al2='
+printf '%s\n' \
+  '{"id":"cloudv:al","kind":"cloud-policy-version","aliasSet":"{\"RETURN\":[\"SECRET_TEXT_a\"]}"}' \
+  '{"id":"cloudv:bad","kind":"cloud-policy-version","aliasSet":"{not json SECRET_TEXT_b"}' \
+  '{"id":"api:al2","kind":"api-policy-version","aliasSet":"{\"IF\":[\"SECRET_TEXT_c\"]}"}' \
+  '{"id":"cloudterm:t","kind":"cloud-term","aliasSet":null}' \
+  '{"_count" : 4}' >"$TMP/vocab.jsonl"
+run 1 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new-embed.cp" --sources "$TMP/al.jsonl" --aliases "$TMP/vocab.jsonl"
+has 'alias sets: 3 in vocab export, 3 matched a source'
+has 'compiles: old ok 16 / new ok 16 / 16 (source × lexicon); compared 16'
+has 'alias-path compared: 9'
+has 'newly-failing: 4'
+has 'cloudv:al [cloud-policy-version+aliasSet] zh-CN old=ok{} new=parse{E808:error}'
+hasnt 'cloudv:plain'
+hasnt 'cloudv:bad'
+hasnt 'api:al2'
+has 'result: REVIEW (4 need review;'
+# 不带 --aliases：同一批源只走普通路径，全部一致
+run 0 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new-embed.cp" --sources "$TMP/al.jsonl"
+
+CASE=alias-export-truncated
+printf '%s\n' '{"id":"cloudv:al","aliasSet":"{}"}' '{"_count" : 2}' >"$TMP/vocab-trunc.jsonl"
+run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/al.jsonl" --aliases "$TMP/vocab-trunc.jsonl"
+
 CASE=missing-lexicon-jar
 run 3 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new-nozh.cp" --sources "$TMP/clean.jsonl"
 has 'result: ERROR (environment)'
@@ -214,6 +259,7 @@ run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.j
 run 2 scan --old-cp --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl"
 run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --ts-old-sources-ok 2
 run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --max-gap-pct 5
+run 2 scan --old-cp "$TMP/old.cp" --new-cp "$TMP/new.cp" --sources "$TMP/clean.jsonl" --aliases
 run 2 frobnicate
 
 # ---------- regex-scan.mjs / corpus-to-jsonl.mjs ----------

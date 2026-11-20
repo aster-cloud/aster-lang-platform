@@ -234,8 +234,18 @@ result: STAR (1 STAR rules)
 
 ### Java 门禁（`java-gate/`）
 
-生产编译走 aster-api 的 `InProcessCnlParser`（replay 模块）+ core 的 `TypeChecker`。门禁在一个 JVM 里给旧、新引擎各建一个
+生产编译走 aster-api 的 `InProcessCnlParser` + core 的 `TypeChecker`。门禁在一个 JVM 里给旧、新引擎各建一个
 隔离的 `URLClassLoader`（各自的 replay + core + truffle + 语言包），每份源在 en-US / zh-CN / de-DE / hi-IN 下各编译一次。
+
+解析器按侧反射选择：该侧 classpath 上有 aster-api 自己的副本 `io.aster.policy.parser.InProcessCnlParser` 就用它（aster-api 删除
+副本之前的生产路径），否则用 core 的 `aster.core.embed.InProcessCnlParser`（删除之后，aster-api A1）。输出的 `parser:` 行写明
+两侧各用了哪一个——比较「删除副本」本身时旧侧应是前者、新侧应是后者。
+
+**别名路径（`--aliases`）**：E808 别名名字守卫（ADR 0060 §5.3）与解析失败归因只在带别名集的编译上发生（aster-api 执行已存版本时
+`parseWithUserAliases(source, locale, scopes, aliasSet, true)` 复验冻结的别名集）。给出 `export --with-vocab` 的
+`api-vocab.jsonl` / `cloud-vocab.jsonl` 时，id 对得上且有别名集的源再按这条路径各编译一遍（词汇作用域两侧都传 null），
+结果以 `[<kind>+aliasSet]` 标签进入同样的分组；别名集原文不可读时两侧都记 `unreadable-aliasSet`（vocab-check 另行报告）。
+别名路径不进 `compiles` / sanity 统计（ts 扫描不带别名集），只另打一行 `alias-path compared: N`。
 
 ```bash
 # 1. 每侧准备一个工作区：aster-api 检出，同级目录放好该侧的 aster-lang-core / -runtime / -truffle / -validation / -hi / -locales
@@ -247,6 +257,7 @@ scripts/gate-scan/java-gate/java-gate.sh classpath --api ~/wt-gate-x/new/aster-a
 scripts/gate-scan/gate-scan.sh scan --sources "$D" --keep --old-ts <旧> --new-ts <新> > ts-scan.txt
 scripts/gate-scan/java-gate/java-gate.sh scan --old-cp ~/wt-gate-x/old.cp --new-cp ~/wt-gate-x/new.cp \
   --sources "$D/api.jsonl" --sources "$D/cloud.jsonl" --ts-scan ts-scan.txt
+# 改动涉及别名处理时（导出时带 --with-vocab）再加：--aliases "$D/api-vocab.jsonl" --aliases "$D/cloud-vocab.jsonl"
 ```
 
 需要 JDK 25（`JAVA_HOME`，macOS 上缺省用 `java_home -v 25`）。分组：
