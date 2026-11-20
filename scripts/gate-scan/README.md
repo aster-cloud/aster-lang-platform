@@ -9,6 +9,7 @@ aster-lang-ts 构建编译一遍，报告编译结论发生变化的策略。报
 | `export-policy-sources.sql` | 只读导出（READ ONLY 事务），输出 JSONL `{id, kind, content}`，末行完成标记 `{"_count" : N}` |
 | `export-profile-impact.sql` | `input-refs` 用：cloud 库每个源的租户与近 30 天需审批执行数；aster_api 库的签名事实签发方（不含公钥） |
 | `export-profile-ids.sql` | `input-refs` 用：cloud 库中源码头部声明了档案的 id（独立于编译器的对账集合） |
+| `export-vocab.sql` | `export --with-vocab` 用：每个版本 / 词条的语言、aliasSet、内嵌词汇与引用快照的触发词与规范名（不含源码） |
 | `scan.mjs` | 比较两个 ts 构建上的诊断码集合，只打印 id / kind / lexicon / 诊断码 |
 | `input-refs.mjs` | 列出档案模块每条 Verdict 规则的 `inputRefs`，标出 `*` / `""`，合入影响面并对账 |
 | `common.mjs` | `scan.mjs` 与 `input-refs.mjs` 共用：构建 / lexicon 加载、静默编译、导出校验、源计数 |
@@ -16,6 +17,7 @@ aster-lang-ts 构建编译一遍，报告编译结论发生变化的策略。报
 | `java-gate/` | 补充扫描：Java 生产编译路径（aster-api InProcessCnlParser + TypeChecker）旧引擎 vs 新引擎，含 Core IR 差异，见下文 |
 | `ir-diff.mjs` | 补充扫描：两个 ts 构建上 `compileAndTypecheck` 的结论、类型诊断与规范 Core IR 差异 |
 | `regex-scan.mjs` | 补充扫描：按规则文件对导出逐行跑 PCRE 预筛，只打印 id / kind / 规则名 |
+| `vocab-check.mjs` + `vocab-rules/` | 补充扫描：字面量触发词 / 词汇 / aliasSet 与关键词拼写的碰撞，只打印 id / kind / lexicon / 规则名 |
 | `corpus-to-jsonl.mjs` | 把 aster-lang-test 语料写成导出格式，供补充扫描在不碰生产数据的前提下自测 |
 
 ## 何时运行
@@ -227,7 +229,7 @@ result: STAR (1 STAR rules)
 ## 补充扫描（引擎改动可能改变 IR，或只影响 Java 侧时）
 
 标准扫描只比较 ts `compile()` 的诊断码：看不见 Core IR 的变化，也看不见生产实际走的 Java 编译路径。aster-lang-core 的改动、
-或任何可能「诊断不变、IR 变了」的改动（标识符改名、规范化器改动、新 IR 节点），在标准扫描之外再跑下面三项。
+或任何可能「诊断不变、IR 变了」的改动（标识符改名、规范化器改动、新 IR 节点），在标准扫描之外再跑下面前三项；改动涉及关键词拼写或字面量触发词时另跑词汇 / 别名碰撞检查。
 它们都只读导出文件（标准扫描加 `--keep` 保留导出），用完照常删除导出。
 
 ### Java 门禁（`java-gate/`）
@@ -299,6 +301,47 @@ node scripts/gate-scan/regex-scan.mjs --rules rules.txt --sources "$D/api.jsonl"
 （如 ADR 0056 修订 A3 §6）。匹配交给系统 perl 逐行执行（与 `grep -P` 同语义），输出 `hit <id> <kind> <规则名>`；
 命中只是预筛，要与 Java / ts 的 IR 差异交叉核对。退出码 0 无命中、1 有命中、2 用法错误、3 规则 / 导出损坏或 perl 失败。
 
+### 词汇 / 别名碰撞（`vocab-check.mjs`）
+
+改动让某些拼写成为关键词、或改变字面量触发词与关键词同形时的处理（如 ADR 0060 修订 1 R16'、ADR 0058 修订 2 的类型别名引导词）时，
+源码扫描看不到风险：风险在版本的 aliasSet 与词汇里。先带 `--with-vocab` 导出，再按规则检查：
+
+```bash
+D=~/gate-scan-export-vocab
+mkdir -m 700 "$D"
+scripts/gate-scan/gate-scan.sh export --out "$D" --with-vocab --allow-empty-api-db
+node scripts/gate-scan/vocab-check.mjs --sources "$D/cloud-vocab.jsonl" --sources "$D/api-vocab.jsonl" --allow-empty-api
+rm -rf "$D"
+```
+
+`export-vocab.sql` 与其它导出同一条路径（`kubectl exec` + `READ ONLY` 事务 + `{"_count" : N}` 完成标记），不导出源码，每行：
+
+| 字段 | 来源 |
+| --- | --- |
+| `id` / `kind` | `cloudv:` `cloud-policy-version`（`"PolicyVersion"` 每行一条）、`cloudterm:` `cloud-domain-term`（未删除、未归档的 `"UserDomainTerm"` 关联的 `"DomainTerm"`）、`api:` `api-policy-version`（`policy_versions`） |
+| `lexicon` | cloud 版本没有 locale 列：按 aster-cloud `policy-version-locale.ts` 对候选 locale 重算 `sourceEnvelopeSha256`（`lexiconFrom=envelope`），否则取引用快照唯一的 locale（`snapshot`），否则为空；词条取 `DomainTerm.locale`；api 取 `policy_versions.locale` |
+| `aliasSet` | `"PolicyVersion"."aliasSet"` / `policy_versions.alias_set` 原文（JSON 文本 kind→[别名]） |
+| `embedded` | `"PolicyVersion"."embeddedVocabulary"` 原文（ADR 0060 §6.1） |
+| `vocabularies` | `vocabularySnapshotIds` 引用的 `"UserVocabularySnapshot"."vocabularyJson"`、`policy_versions.vocabulary_json`、词条本身，只投影 `localized` / `aliases[]`（触发词，`literals` 另列为字面量触发词）与 `canonical`，并标出引用但不存在的快照 |
+
+较新迁移才有的列（`embeddedVocabulary`、`sourceScopesJson`、`vocabulary_json`、`locale`）经 `to_jsonb(行)` 读取：生产库尚未迁移时读到空值，
+导出不会因列不存在而失败。
+
+规则文件 `vocab-rules/*.json`（缺省全部加载，`--rules` 可指定）：`spellings` 按 locale（`*` 表示所有 locale）列出拼写，每条规则给出
+`subject`（`aliasSet` / `literalTriggers` / `triggers` / `values`）与 `against`（`spellings`：该记录语言的拼写并上 `*`；`aliasSet`：记录自己的别名）。
+比较为折叠相等：两侧 NFC 后用 `u` + `i` 正则（Unicode 简单大小写折叠，与引擎 `foldKey` 同口径）。语言未知的记录按全部 locale 从宽检查，
+lexicon 打印为 `?`。
+
+| 规则文件 | 规则 | 含义 |
+| --- | --- | --- |
+| `d1-literal-keyword-shadow.json` | `D1_trigger_keyword` | 字面量触发词等于该版本语言或 en-US 的关键词拼写（拼写取自 aster-lang-core#299 正文，已与 lexicon JSON 核对） |
+| | `D1_trigger_aliasSet` | 字面量触发词等于该版本 aliasSet 的别名 |
+| `d3-type-alias-keyword.json` | `D3_aliasSet` / `D3_vocab_trigger` / `D3_vocab_value` | aliasSet 别名 / 词汇触发词 / 规范名等于 `类型`、`Typ`、`प्रकार`（不分 locale） |
+
+输出 `records:` 与 `lexicons:` 计数，每个命中一行 `hit <id> <kind> <lexicon> <规则名>`，再 `per-rule:` 与 `result: PASS|HITS (...)`；
+**从不打印触发词、别名或词汇内容**。无法检查的记录同样报告：`unreadable_aliasSet`、`unreadable_embedded`、`missing_snapshot`。
+退出码 0 无命中、1 有命中、2 用法错误、3 导出 / 规则文件损坏或 cloud 导出为空（api 为空需 `--allow-empty-api`）。
+
 ### 先自测再信任生产结果
 
 每轮补充扫描先在 aster-lang-test 语料上跑一遍，再为本轮每个风险各写一份合成源，确认每个风险都能被检出：
@@ -315,13 +358,14 @@ node scripts/gate-scan/corpus-to-jsonl.mjs ~/IdeaProjects/aster-lang-test /tmp/c
   `${TMPDIR:-/tmp}/gate-scan.*` 并在 aster-lang-ts 里 `git worktree prune`。
 - 分步模式：导出文件以 600 权限写入 `--out`；`scan` 结束时删除 `--sources` 下的导出（`--keep` 除外）。
   导出端的那份需要按上面的步骤手工删除——**两台机器上都不要留导出**。
+- `--with-vocab` 的两份导出不含源码，但含别名与词汇原文：与源码导出同样对待（600 权限、只放在 700 目录、检查后删除）。
 - `compile()` 期间屏蔽 console 与 stdout / stderr，输出只含 id、kind、lexicon 与诊断码（`input-refs` 另有模块名、规则名、
   引用路径、租户 id 与计数），**从不打印源码内容**；扫描结果可以直接贴到 issue / PR。
 
 ## 测试
 
 ```bash
-bash scripts/gate-scan/gate-scan.test.sh   # 假构建 + 假 kubectl，覆盖各分组、各失败路径、分步往返
+bash scripts/gate-scan/gate-scan.test.sh   # 假构建 + 假 kubectl，覆盖各分组、各失败路径、分步往返、--with-vocab 与 vocab-check
 GATE_SCAN_OLD_TS=<v1.4.0 构建> GATE_SCAN_NEW_TS=<fix/250 构建> bash scripts/gate-scan/gate-scan.test.sh   # 加真实构建
 ```
 

@@ -5,7 +5,8 @@
 # 四种模式：
 #   （缺省）一体化：构建 → 导出 → 扫描，同一台机器上需要 kubectl 与 Node 24。
 #   export     只导出（只需 kubectl + psql，不需要 Node）：写 api.jsonl / cloud.jsonl 到 --out 目录
-#              （--with-input-refs 另写 input-refs 用的 api-impact / cloud-impact / profile-ids.jsonl）。
+#              （--with-input-refs 另写 input-refs 用的 api-impact / cloud-impact / profile-ids.jsonl；
+#               --with-vocab 另写 vocab-check.mjs 用的 api-vocab / cloud-vocab.jsonl：别名集与词汇触发词，不含源码）。
 #   scan       只扫描（不需要 kubectl）：读 --sources 目录里的导出，退出时删除它们（除非 --keep）。
 #   input-refs 档案模块的规则输入引用清单（ADR 0046 §11.4 ⑦ 翻转前扫描，见 input-refs.mjs）：一个 ts 构建（--ts），
 #              缺省一体化导出 源码 / 影响面 / 对账集合 并自动传 --impact 与 --profile-ids；给 --sources 则只扫描。
@@ -27,10 +28,13 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 SQL_SOURCES="$HERE/export-policy-sources.sql"
 SQL_IMPACT="$HERE/export-profile-impact.sql"
 SQL_IDS="$HERE/export-profile-ids.sql"
+SQL_VOCAB="$HERE/export-vocab.sql"
 SCAN="$HERE/scan.mjs"
 INPUT_REFS="$HERE/input-refs.mjs"
 # input-refs 额外的三份导出（只含 id / 租户 / 计数，不含源码）
 EXTRA_EXPORTS=(api-impact.jsonl cloud-impact.jsonl profile-ids.jsonl)
+# --with-vocab 的两份导出（id / 语言 / 别名集 / 词汇触发词与规范名，不含源码）
+VOCAB_EXPORTS=(api-vocab.jsonl cloud-vocab.jsonl)
 TS_REPO="${ASTER_TS_REPO:-$REPO_ROOT/../aster-lang-ts}"
 
 MODE="all"
@@ -38,7 +42,7 @@ OLD_TS=""; NEW_TS=""; CODE=""; KUBE_CONTEXT=""; SSH_HOST=""
 NAMESPACE="data-services"; POD="shared-postgres-1"
 API_DB="aster_api"; CLOUD_DB="aster_cloud"
 OUT=""; SOURCES_DIR=""; KEEP=false; ALLOW_EMPTY=false; ALLOW_EMPTY_API=false; DRY_RUN=false
-TS=""; PROFILE=""; IMPACTS=(); PROFILE_IDS=""; WITH_INPUT_REFS=false
+TS=""; PROFILE=""; IMPACTS=(); PROFILE_IDS=""; WITH_INPUT_REFS=false; WITH_VOCAB=false
 
 # 清理状态（EXIT trap 读取）
 WORK=""; FETCHED=""; BUILT_ANY=""; PARTIAL_EXPORT=""; DELETE_SOURCES=""
@@ -48,7 +52,7 @@ usage() {
   cat <<EOF
 用法：
   scripts/gate-scan/gate-scan.sh [run] --old-ts <ts> --new-ts <ts> [--code X] [导出选项]   一体化（缺省）
-  scripts/gate-scan/gate-scan.sh export --out <dir> [--with-input-refs] [导出选项]           只导出（kubectl 主机）
+  scripts/gate-scan/gate-scan.sh export --out <dir> [--with-input-refs] [--with-vocab] [导出选项]   只导出（kubectl 主机）
   scripts/gate-scan/gate-scan.sh scan --sources <dir> --old-ts <ts> --new-ts <ts> [--code X] [--keep]   只扫描
   scripts/gate-scan/gate-scan.sh input-refs --ts <ts> --profile <id> [导出选项]                    档案输入引用（一体化）
   scripts/gate-scan/gate-scan.sh input-refs --sources <dir> --ts <ts> --profile <id> [--impact <jsonl> ...]
@@ -65,6 +69,8 @@ usage() {
   --impact <jsonl>      input-refs --sources：export-profile-impact.sql 的导出（可重复；一体化时自动导出并传入）
   --profile-ids <jsonl> input-refs --sources：export-profile-ids.sql 的导出（对账；一体化时自动导出并传入；G3 必需）
   --with-input-refs     export：另导出 api-impact.jsonl / cloud-impact.jsonl / profile-ids.jsonl
+  --with-vocab          export：另导出 api-vocab.jsonl / cloud-vocab.jsonl（export-vocab.sql），供 vocab-check.mjs 检查
+                        字面量触发词 / 别名与关键词的碰撞；api 侧为 0 行按 --allow-empty-api-db 放行，cloud 侧不得为空
 导出选项：
   --kube-context <ctx>  kubectl context（缺省用当前 context）
   --ssh-host <host>     本机没有 kubeconfig 时，经 ssh -o BatchMode=yes <host> 在远端执行 kubectl（stdin 原样转发）
@@ -133,6 +139,7 @@ parse_args() {
       --allow-empty-db) ALLOW_EMPTY=true; shift ;;
       --allow-empty-api-db) ALLOW_EMPTY_API=true; shift ;;
       --with-input-refs) WITH_INPUT_REFS=true; shift ;;
+      --with-vocab) WITH_VOCAB=true; shift ;;
       --dry-run) DRY_RUN=true; shift ;;
       -h|--help) usage; exit 0 ;;
       *) usage_error "未知参数 $1" ;;
@@ -150,10 +157,11 @@ validate_args() {
   if [ "$MODE" = export ]; then
     [ -n "$OUT" ] || usage_error "export 需要 --out"
     [ -z "$OLD_TS$NEW_TS$CODE$SOURCES_DIR$ir_only" ] && [ "$KEEP" = false ] \
-      || usage_error "export 只接受 --out、--with-input-refs 与导出选项"
+      || usage_error "export 只接受 --out、--with-input-refs、--with-vocab 与导出选项"
     return 0
   fi
   [ "$WITH_INPUT_REFS" = false ] || usage_error "--with-input-refs 只用于 export"
+  [ "$WITH_VOCAB" = false ] || usage_error "--with-vocab 只用于 export（检查用 node scripts/gate-scan/vocab-check.mjs）"
   if [ "$MODE" = input-refs ]; then
     validate_input_refs_args
     return 0
@@ -343,6 +351,14 @@ export_input_refs_extras() {  # 目录
   check_export "$1/profile-ids.jsonl" "$CLOUD_DB" 1
 }
 
+# --with-vocab 的两份导出：aster_api 可为空（与源码导出同一放行旗标），cloud 不得为空（每个 PolicyVersion 一行）。
+export_vocab_extras() {  # 目录
+  export_db "$SQL_VOCAB" "$API_DB" "$1/api-vocab.jsonl"
+  check_export "$1/api-vocab.jsonl" "$API_DB" "$(api_empty_allowed)" "$API_EMPTY_HINT"
+  export_db "$SQL_VOCAB" "$CLOUD_DB" "$1/cloud-vocab.jsonl" -v cloud=1
+  check_export "$1/cloud-vocab.jsonl" "$CLOUD_DB" "$(cloud_empty_allowed)" "$CLOUD_EMPTY_HINT"
+}
+
 # ---------- 扫描 ----------
 
 run_scan() {  # api.jsonl cloud.jsonl
@@ -407,7 +423,7 @@ cleanup() {
     git -C "$TS_REPO" worktree prune >/dev/null 2>&1 || true
   fi
   if [ -n "$PARTIAL_EXPORT" ]; then
-    rm -f "$OUT/api.jsonl" "$OUT/cloud.jsonl" "${EXTRA_EXPORTS[@]/#/$OUT/}" || true
+    rm -f "$OUT/api.jsonl" "$OUT/cloud.jsonl" "${EXTRA_EXPORTS[@]/#/$OUT/}" "${VOCAB_EXPORTS[@]/#/$OUT/}" || true
     log "导出未完成，已删除 $OUT 下的部分导出"
   fi
   if [ -n "$DELETE_SOURCES" ]; then
@@ -423,18 +439,21 @@ mode_export() {
   if [ "$DRY_RUN" = true ]; then
     export_both "$OUT"
     if [ "$WITH_INPUT_REFS" = true ]; then export_input_refs_extras "$OUT"; fi
+    if [ "$WITH_VOCAB" = true ]; then export_vocab_extras "$OUT"; fi
     finish 0
   fi
   mkdir -p "$OUT" || fail "无法创建 $OUT"
   # -L 单独检查：悬空符号链接 -e 为假，写入会穿过链接落到别处
   local f files=("$OUT/api.jsonl" "$OUT/cloud.jsonl")
   if [ "$WITH_INPUT_REFS" = true ]; then files+=("${EXTRA_EXPORTS[@]/#/$OUT/}"); fi
-  for f in "$OUT/api.jsonl" "$OUT/cloud.jsonl" "${EXTRA_EXPORTS[@]/#/$OUT/}"; do
+  if [ "$WITH_VOCAB" = true ]; then files+=("${VOCAB_EXPORTS[@]/#/$OUT/}"); fi
+  for f in "$OUT/api.jsonl" "$OUT/cloud.jsonl" "${EXTRA_EXPORTS[@]/#/$OUT/}" "${VOCAB_EXPORTS[@]/#/$OUT/}"; do
     if [ -e "$f" ] || [ -L "$f" ]; then fail "$OUT 里已有 api.jsonl / cloud.jsonl 等导出（或符号链接）——先删除旧导出"; fi
   done
   PARTIAL_EXPORT=1
   export_both "$OUT"
   if [ "$WITH_INPUT_REFS" = true ]; then export_input_refs_extras "$OUT"; fi
+  if [ "$WITH_VOCAB" = true ]; then export_vocab_extras "$OUT"; fi
   PARTIAL_EXPORT=""
   wc -l "${files[@]}" | sed '$d' | while read -r lines file; do
     echo "$file  $((lines - 1)) rows (+1 marker line)"
