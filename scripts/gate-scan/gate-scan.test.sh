@@ -92,8 +92,10 @@ echo "$*" >>"$FAKE_KUBECTL_LOG"
 sql="$(cat)"
 grep -q 'READ ONLY' <<<"$sql" || { echo "shim: SQL 不是只读事务" >&2; exit 9; }
 [ "${FAKE_KUBECTL_FAIL:-}" = 1 ] && { echo "shim: error: unable to upgrade connection" >&2; exit 1; }
-# 按 SQL 内容区分三份导出：源码（export-policy-sources）、影响面（export-profile-impact）、对账集合（export-profile-ids）
-if grep -q 'gatedExecutions30d' <<<"$sql"; then what=IMPACT
+# 按 SQL 内容区分四种导出：源码（export-policy-sources）、影响面（export-profile-impact）、对账集合（export-profile-ids）、
+# 词汇（export-vocab）
+if grep -q 'vocabularies' <<<"$sql"; then what=VOCAB
+elif grep -q 'gatedExecutions30d' <<<"$sql"; then what=IMPACT
 elif grep -q 'Profil' <<<"$sql"; then what=IDS
 else what=SRC; fi
 case "$what: $* " in
@@ -102,6 +104,8 @@ case "$what: $* " in
   "IMPACT:"*" -d aster_api "*) cat "$FAKE_API_IMPACT_JSONL" ;;
   "IMPACT:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_IMPACT_JSONL" ;;
   "IDS:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_IDS_JSONL" ;;
+  "VOCAB:"*" -d aster_api "*) cat "$FAKE_API_VOCAB_JSONL" ;;
+  "VOCAB:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_VOCAB_JSONL" ;;
   *) echo "shim: 未知库 / 导出 $what $*" >&2; exit 9 ;;
 esac
 EOF
@@ -451,6 +455,164 @@ run_script 1 input-refs --sources "$TMP/irx" --ts "$TS150" --profile eu-ai-act-h
 expect_out '^reconcile: SKIPPED'
 [ -f "$TMP/irx/cloud.jsonl" ] || fail "--keep 应保留导出"
 rm -rf "$TMP/irx"
+
+# ---------- 词汇 / 别名碰撞（export --with-vocab + vocab-check.mjs） ----------
+# 合成导出：每条记录一行，字段与 export-vocab.sql 相同；触发词与别名都是会命中 / 不该命中的拼写，另带 SECRET_TEXT_ 标记，
+# 用来验证 vocab-check 只打印 id / kind / lexicon / 规则名。
+API_VOCAB="$TMP/api-vocab.jsonl"; CLOUD_VOCAB="$TMP/cloud-vocab.jsonl"
+export FAKE_API_VOCAB_JSONL="$API_VOCAB" FAKE_CLOUD_VOCAB_JSONL="$CLOUD_VOCAB"
+cat >"$TMP/mkvocab.mjs" <<'EOF'
+import { writeFileSync } from 'node:fs';
+const [apiOut, cloudOut] = process.argv.slice(2);
+const kinds = { api: 'api-policy-version', cloudv: 'cloud-policy-version', cloudterm: 'cloud-domain-term' };
+const lit = (localized, canonical = 'SECRET_TEXT_value') => ({ kind: 'literal', localized, canonical });
+const emb = (...terms) => JSON.stringify({ v: 1, terms });
+const vocab = (o = {}) => ({ source: 'snapshot', id: 's', locale: null, found: true, literalTriggers: [], triggers: [], values: [], ...o });
+const row = (id, lexicon, o = {}) => ({ id, kind: kinds[id.split(':')[0]], lexicon, lexiconFrom: lexicon ? 'envelope' : null,
+  aliasSet: null, embedded: null, vocabularies: [], ...o });
+const cloud = [
+  // D1：字面量触发词 = 本语言关键词 / 折叠后相等 / zh 里的 en-US 拼写（短码 zh）/ NFC 不同写法 / 语言未知按全部 locale
+  row('cloudv:d1kw', 'zh-CN', { embedded: emb(lit('返回'), { kind: 'struct', localized: 'SECRET_TEXT_s', canonical: 'S' }) }),
+  row('cloudv:d1fold', 'en-US', { vocabularies: [vocab({ literalTriggers: ['greeting', 'RETURN'], triggers: ['greeting', 'RETURN'] })] }),
+  row('cloudv:d1en', 'zh', { embedded: emb(lit('Text')) }),
+  row('cloudv:d1nfc', 'hi-IN', { embedded: emb(lit('प्रो\u095Eाइल')) }),
+  row('cloudv:d1unknown', null, { embedded: emb(lit('Profil')) }),
+  // D1：字面量触发词 = 本版本 aliasSet 的别名（折叠后）
+  row('cloudv:d1alias', 'en-US', { aliasSet: JSON.stringify({ RETURN: ['giveback', 'SECRET_TEXT_a'] }), embedded: emb(lit('GiveBack')) }),
+  // D1 对照：他语言的拼写、非字面量词条、多词关键词的一部分、仅前缀相同、别名属于别的写法
+  row('cloudv:ctl_d1_locale', 'en-US', { embedded: emb(lit('返回'), lit('Profil')) }),
+  row('cloudv:ctl_d1_struct', 'en-US', { embedded: emb({ kind: 'struct', localized: 'Return', canonical: 'R' }),
+    vocabularies: [vocab({ triggers: ['Text'] })] }),
+  row('cloudv:ctl_d1_word', 'en-US', { embedded: emb(lit('result'), lit('Returns'), lit('greeting')) }),
+  row('cloudv:ctl_d1_alias', 'en-US', { aliasSet: JSON.stringify({ RETURN: ['handback'] }), embedded: emb(lit('giveback')) }),
+  // D3：aliasSet / 任意种类的触发词 / 规范名等于新类型关键词（不分 locale、不分大小写）
+  row('cloudv:d3alias', 'de-DE', { aliasSet: JSON.stringify({ TYPE_ALIAS: ['TYP'] }) }),
+  row('cloudv:d3trig', 'zh-CN', { vocabularies: [vocab({ triggers: ['类型'], values: ['Kind'] })] }),
+  row('cloudv:d3hi', 'hi-IN', { embedded: emb({ kind: 'field', localized: 'प्रकार', canonical: 'kind', parent: 'P' }) }),
+  row('cloudv:d3value', 'en-US', { embedded: emb(lit('SECRET_TEXT_t', 'typ')) }),
+  row('cloudterm:d3term', 'zh-CN', { lexiconFrom: 'term', vocabularies: [vocab({ source: 'term', triggers: ['种类', '类型'], values: ['kind'] })] }),
+  // D3 对照：近似拼写
+  row('cloudv:ctl_d3', 'de-DE', { aliasSet: JSON.stringify({ TYPE_ALIAS: ['Typo'] }), embedded: emb({ kind: 'struct', localized: 'Typen', canonical: 'Types' }) }),
+  // 无法检查的记录
+  row('cloudv:badalias', 'en-US', { aliasSet: '{not json SECRET_TEXT_x' }),
+  row('cloudv:badembedded', 'en-US', { embedded: '[1,2]' }),
+  // 嵌套形状不符不得被静默跳过（否则藏住命中）：别名里的数组、缺 v、未知 kind、非字符串 localized、快照里的非字符串触发词
+  row('cloudv:badalias2', 'de-DE', { aliasSet: JSON.stringify({ TYPE_ALIAS: [['Typ']] }) }),
+  row('cloudv:badembedded2', 'zh-CN', { embedded: JSON.stringify({ terms: [lit('返回')] }) }),
+  row('cloudv:badembedded3', 'zh-CN', { embedded: emb({ kind: 'literalx', localized: '返回', canonical: 'x' }) }),
+  row('cloudv:badembedded4', 'zh-CN', { embedded: emb({ kind: 'literal', localized: ['返回'], canonical: 'x' }) }),
+  row('cloudv:badvocab', 'de-DE', { vocabularies: [vocab({ triggers: [['Typ']] })] }),
+  row('cloudv:missing', 'de-DE', { vocabularies: [vocab({ found: false })] }),
+  row('cloudv:clean', 'en-US'),
+];
+const api = [
+  row('api:d1', 'zh-CN', { vocabularies: [vocab({ source: 'frozen', literalTriggers: ['文本'], triggers: ['文本'] })] }),
+  row('api:clean', null),
+];
+const write = (out, rows) => writeFileSync(out, [...rows.map(r => JSON.stringify(r)), `{"_count" : ${rows.length}}`].join('\n') + '\n');
+write(apiOut, api);
+write(cloudOut, cloud);
+EOF
+vocab_exports() { node "$TMP/mkvocab.mjs" "$API_VOCAB" "$CLOUD_VOCAB"; }
+VOCAB_CHECK="$HERE/vocab-check.mjs"
+run_check() {  # 期望退出码, vocab-check 参数...
+  local want="$1"; shift
+  local rc=0
+  node "$VOCAB_CHECK" "$@" >"$TMP/out" 2>"$TMP/err" || rc=$?
+  [ "$rc" -eq "$want" ] || fail "vocab-check $* 期望 rc=${want}，实际 rc=${rc}"
+  ! grep -q -F -e SECRET_TEXT -e '返回' -e '文本' -e '类型' -e 'प्रकार' -e GiveBack -e giveback -e Profil "$TMP/out" "$TMP/err" \
+    || fail "输出泄露了触发词 / 别名 / 词汇内容"
+}
+hits() { grep '^hit ' "$TMP/out" | awk '{print $2 "/" $4 "/" $5}' | sort | tr '\n' ' ' || true; }
+expect_hits() { [ "$(hits)" = "$1" ] || fail "命中应为 '$1'，实际 '$(hits)'"; }
+
+CASE="--with-vocab 用法"
+run_script 2 --old-ts a --new-ts b --with-vocab
+run_script 2 scan --sources "$TMP/x" --old-ts a --new-ts b --with-vocab
+run_script 2 input-refs --ts a --profile p --with-vocab
+run_script 0 --help; expect_out '--with-vocab'
+
+CASE="--with-vocab dry-run"
+: >"$FAKE_KUBECTL_LOG"
+run_script 0 export --out "$TMP/never" --with-vocab --dry-run
+expect_out "-d aster_api -f - < .*export-vocab.sql > .*api-vocab.jsonl"
+expect_out "-d aster_cloud -v cloud=1 -f - < .*export-vocab.sql > .*cloud-vocab.jsonl"
+[ ! -e "$TMP/never" ] || fail "export --dry-run 不应创建目录"
+[ ! -s "$FAKE_KUBECTL_LOG" ] || fail "dry-run 不应调用 kubectl"
+
+CASE="export --with-vocab"
+default_exports; vocab_exports
+: >"$FAKE_KUBECTL_LOG"
+run_script 0 export --out "$TMP/vx" --with-vocab
+expect_out "$TMP/vx/api-vocab.jsonl  2 rows"
+expect_out "$TMP/vx/cloud-vocab.jsonl  25 rows"
+[ "$(wc -l <"$FAKE_KUBECTL_LOG")" -eq 4 ] || fail "export --with-vocab 应调用 kubectl 四次（源码×2、词汇×2）"
+[ "$(grep -c -- '-d aster_cloud -v cloud=1 -f -' "$FAKE_KUBECTL_LOG")" -eq 2 ] || fail "cloud 词汇导出应带 -v cloud=1"
+for f in api cloud api-vocab cloud-vocab; do
+  perm="$(ls -l "$TMP/vx/$f.jsonl" | cut -c1-10)"
+  [ "$perm" = "-rw-------" ] || fail "$f.jsonl 权限应为 600，实际 $perm"
+done
+run_script 3 export --out "$TMP/vx" --with-vocab; expect_err '已有 api.jsonl'
+rm "$TMP/vx/api.jsonl" "$TMP/vx/cloud.jsonl"
+run_script 3 export --out "$TMP/vx" --with-vocab; expect_err '已有 api.jsonl'   # 只剩词汇导出也拒绝覆盖
+[ -f "$TMP/vx/cloud-vocab.jsonl" ] || fail "拒绝覆盖时不应删除已有导出"
+run_check 1 --sources "$TMP/vx/cloud-vocab.jsonl" --sources "$TMP/vx/api-vocab.jsonl"
+expect_out '^result: HITS'
+rm -rf "$TMP/vx"
+
+CASE="--with-vocab 导出截断与空导出"
+head -n 3 "$CLOUD_VOCAB" >"$TMP/cv-cut.jsonl"
+FAKE_CLOUD_VOCAB_JSONL="$TMP/cv-cut.jsonl" run_script 3 export --out "$TMP/vcut" --with-vocab
+expect_err '应恰好有 1 行完成标记'
+[ -z "$(ls -A "$TMP/vcut")" ] || fail "词汇导出截断时应删除全部部分导出"
+printf '{"_count" : 0}\n' >"$TMP/empty.jsonl"
+FAKE_CLOUD_VOCAB_JSONL="$TMP/empty.jsonl" run_script 3 export --out "$TMP/vempty" --with-vocab --allow-empty-api-db
+expect_err 'aster_cloud 导出为 0 行'
+[ -z "$(ls -A "$TMP/vempty")" ] || fail "cloud 词汇导出为空时应删除部分导出"
+FAKE_API_VOCAB_JSONL="$TMP/empty.jsonl" run_script 3 export --out "$TMP/vempty" --with-vocab
+expect_err 'aster_api 导出为 0 行'
+FAKE_API_VOCAB_JSONL="$TMP/empty.jsonl" run_script 0 export --out "$TMP/vempty" --with-vocab --allow-empty-api-db
+expect_out "api-vocab.jsonl  0 rows"
+rm -rf "$TMP/vempty" "$TMP/vcut"
+
+CASE="vocab-check 规则命中与对照"
+run_check 1 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB"
+expect_hits 'api:d1/zh-CN/D1_trigger_keyword cloudterm:d3term/zh-CN/D3_vocab_trigger cloudv:badalias/en-US/unreadable_aliasSet cloudv:badalias2/de-DE/unreadable_aliasSet cloudv:badembedded/en-US/unreadable_embedded cloudv:badembedded2/zh-CN/unreadable_embedded cloudv:badembedded3/zh-CN/unreadable_embedded cloudv:badembedded4/zh-CN/unreadable_embedded cloudv:badvocab/de-DE/unreadable_vocabulary cloudv:d1alias/en-US/D1_trigger_aliasSet cloudv:d1en/zh-CN/D1_trigger_keyword cloudv:d1fold/en-US/D1_trigger_keyword cloudv:d1kw/zh-CN/D1_trigger_keyword cloudv:d1nfc/hi-IN/D1_trigger_keyword cloudv:d1unknown/?/D1_trigger_keyword cloudv:d3alias/de-DE/D3_aliasSet cloudv:d3hi/hi-IN/D3_vocab_trigger cloudv:d3trig/zh-CN/D3_vocab_trigger cloudv:d3value/en-US/D3_vocab_value cloudv:missing/de-DE/missing_snapshot '
+! grep -q -e 'ctl_' -e ':clean ' "$TMP/out" || fail "对照记录不应命中"
+expect_out '^records: cloud-policy-version=24 cloud-domain-term=1 api-policy-version=2$'
+expect_out '^lexicons: en-US=10 zh-CN=8 de-DE=5 hi-IN=2 ?=2$'
+expect_out '^per-rule: unreadable_aliasSet=2 unreadable_embedded=4 unreadable_vocabulary=1 missing_snapshot=1 D1_trigger_keyword=6 D1_trigger_aliasSet=1 D3_aliasSet=1 D3_vocab_trigger=3 D3_vocab_value=1$'
+expect_out '^result: HITS (20 hits, 20 ids)$'
+
+CASE="vocab-check 单个规则文件"
+run_check 1 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB" --rules "$HERE/vocab-rules/d3-type-alias-keyword.json"
+expect_hits 'cloudterm:d3term/zh-CN/D3_vocab_trigger cloudv:badalias/en-US/unreadable_aliasSet cloudv:badalias2/de-DE/unreadable_aliasSet cloudv:badembedded/en-US/unreadable_embedded cloudv:badembedded2/zh-CN/unreadable_embedded cloudv:badembedded3/zh-CN/unreadable_embedded cloudv:badembedded4/zh-CN/unreadable_embedded cloudv:badvocab/de-DE/unreadable_vocabulary cloudv:d3alias/de-DE/D3_aliasSet cloudv:d3hi/hi-IN/D3_vocab_trigger cloudv:d3trig/zh-CN/D3_vocab_trigger cloudv:d3value/en-US/D3_vocab_value cloudv:missing/de-DE/missing_snapshot '
+
+CASE="vocab-check 无命中"
+node -e '
+const fs = require("fs");
+const row = { id: "cloudv:a", kind: "cloud-policy-version", lexicon: "en-US", lexiconFrom: "envelope", aliasSet: "{\"RETURN\":[\"handback\"]}",
+  embedded: JSON.stringify({ v: 1, terms: [{ kind: "literal", localized: "greeting", canonical: "hi" }] }), vocabularies: [] };
+fs.writeFileSync(process.argv[1], JSON.stringify(row) + "\n{\"_count\" : 1}\n");
+' "$TMP/pass-vocab.jsonl"
+run_check 3 --sources "$TMP/pass-vocab.jsonl"; expect_err 'api-policy-version 为 0'
+run_check 0 --sources "$TMP/pass-vocab.jsonl" --allow-empty-api
+expect_out '^result: PASS (0 hits)$'
+
+CASE="vocab-check 输入错误"
+run_check 2
+run_check 2 --sources "$CLOUD_VOCAB" --bogus
+run_check 2 --sources "$CLOUD_VOCAB" --rules "$TMP/no-such-rules.json"
+run_check 3 --sources "$CLOUD_VOCAB" --sources "$CLOUD_VOCAB" --allow-empty-api; expect_err '记录 id 重复'
+run_check 3 --sources "$TMP/cv-cut.jsonl" --allow-empty-api; expect_err '应恰好有 1 行完成标记'
+printf '{"id":"cloud:x","kind":"cloud-policy","vocabularies":[]}\n{"_count" : 1}\n' >"$TMP/bad-kind.jsonl"
+run_check 3 --sources "$TMP/bad-kind.jsonl" --allow-empty-api; expect_err '字段不合要求'
+run_check 3 --sources "$TMP/empty.jsonl" --sources "$API_VOCAB"; expect_err 'cloud-policy-version 为 0'
+printf '{"rules":[{"name":"X","subject":"triggers","against":"spellings"}],"spellings":{"fr-FR":["x"]}}\n' >"$TMP/bad-rules.json"
+run_check 3 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB" --rules "$TMP/bad-rules.json"; expect_err '未知 locale fr-FR'
+printf '{"rules":[{"name":"missing_snapshot","subject":"triggers","against":"aliasSet"}]}\n' >"$TMP/bad-rules.json"
+run_check 3 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB" --rules "$TMP/bad-rules.json"; expect_err '保留名冲突'
+default_exports
 
 # ---------- 常规 diff 扫描的源计数与 --allow-empty-api-db ----------
 CASE="diffScanPrintsSourceCounts"

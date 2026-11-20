@@ -1,0 +1,11 @@
+{
+  "description": "ADR 0058 修订 2（类型别名引导词本地化）：zh 类型、de Typ、hi प्रकार 成为 TYPE_ALIAS 关键词。aliasSet 中等于新拼写的别名会被 UserAliasValidator「别名不得等于规范拼写」拒绝；词汇中等于新拼写的触发词按 R16' 不再展开，cloud 下次保存时被 embedded_vocabulary_shadows_keyword 拒绝。按各 PR 正文，正则 (?i)^(?:类型|typ|प्रकार)$ 不分 locale。",
+  "refs": ["aster-cloud/aster-lang-locales#153", "aster-cloud/aster-lang-hi#114", "aster-cloud/aster-lang-core#301", "aster-cloud/aster-lang-ts#379", "aster-cloud/aster-lang-test#241"],
+  "provenance": "aster-lang-core#301 正文 Gate scan 第 3 条。",
+  "spellings": { "*": ["类型", "Typ", "प्रकार"] },
+  "rules": [
+    { "name": "D3_aliasSet", "subject": "aliasSet", "against": "spellings", "description": "aliasSet 的别名等于新类型关键词" },
+    { "name": "D3_vocab_trigger", "subject": "triggers", "against": "spellings", "description": "词汇触发词（任意种类的 localized / aliases[]）等于新类型关键词" },
+    { "name": "D3_vocab_value", "subject": "values", "against": "spellings", "description": "词汇规范名 / 字面量值（canonical）等于新类型关键词（信息项，供复核）" }
+  ]
+}
