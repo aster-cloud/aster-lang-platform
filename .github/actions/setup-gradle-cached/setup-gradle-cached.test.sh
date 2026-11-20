@@ -32,6 +32,7 @@ case "${plan[$i]}" in
                echo "> Could not GET 'https://repo.maven.apache.org/maven2/org/openjdk/jmh/jmh-core/1.37/jmh-core-1.37.pom'. Received status code 429 from server: Too Many Requests" >&2
                echo "BUILD FAILED" >&2; exit 1 ;;
   fail)        echo "> Could not resolve org.example:missing:1.0 (404)" >&2; echo "BUILD FAILED" >&2; exit 7 ;;
+  testlog429)  echo "RateLimitTest > rejects burst FAILED: expected 200 but was 429 Too Many Requests"; echo "BUILD FAILED" >&2; exit 1 ;;
 esac
 EOF
   chmod +x "$1/gradlew"
@@ -81,6 +82,12 @@ run bash "$RETRY" ./gradlew publishToMavenLocal
 [ "$rc" = 7 ] || fail "非限流失败应立即原样返回退出码 7，rc=$rc"
 [ "$(calls)" = 1 ] || fail "非限流失败不应重试，实际 $(calls) 次"
 grep -q "missing:1.0 (404)" "$TMP/err" || fail "非限流失败的 stderr 应原样保留"
+
+# 测试日志里的 429 / Too Many Requests 不是仓库限流：真失败不得重跑。
+newcase retry-test-log-429 "testlog429 ok"
+run bash "$RETRY" ./gradlew :test
+[ "$rc" = 1 ] || fail "测试失败（日志含 429 字样）应立即返回，rc=$rc"
+[ "$(calls)" = 1 ] || fail "测试日志里的 429 不应触发重试，实际 $(calls) 次"
 
 newcase retry-attempts-env "429 429 429 ok"
 GRADLE_RETRY_ATTEMPTS=4 run bash "$RETRY" ./gradlew build

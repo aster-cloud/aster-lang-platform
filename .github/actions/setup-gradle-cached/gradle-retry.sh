@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 执行一条 Gradle 命令；失败且输出里有 Maven Central 限流（HTTP 429）时退避重试（aster-lang-platform#138）。
+# 执行一条 Gradle 命令；失败且 Gradle 报告仓库限流（HTTP 429）时退避重试（aster-lang-platform#138）。
 #
 # 用法：gradle-retry.sh <命令> [参数…]        例：gradle-retry.sh ./gradlew publishToMavenLocal
 #
@@ -15,7 +15,10 @@
 #   GRADLE_RETRY_ATTEMPTS  总尝试次数，缺省 3
 #   GRADLE_RETRY_DELAYS    各次重试前的基础等待秒数（空格分隔，不够长时沿用最后一个），缺省 "30 90"
 #   GRADLE_RETRY_JITTER    每次等待额外加 0..N 秒随机抖动，缺省 15（同层并行的多个仓不要同时重试）
-#   GRADLE_RETRY_PATTERN   判定限流的 ERE，缺省 'status code 429|Too Many Requests'
+#   GRADLE_RETRY_PATTERN   判定限流的 ERE，缺省 'Received status code 429'——Gradle 仓库访问失败的原话
+#                          （「Could not GET '…'. Received status code 429 from server: Too Many Requests」）。
+#                          不用宽泛的「Too Many Requests」：被包住的若是测试任务，测试日志里本来就可能出现 429 字样，
+#                          真失败不能被当成限流重跑。
 set -uo pipefail
 
 [ $# -gt 0 ] || { echo "::error::gradle-retry.sh: 缺少要执行的命令" >&2; exit 2; }
@@ -24,7 +27,7 @@ attempts="${GRADLE_RETRY_ATTEMPTS:-3}"
 read -r -a delays <<<"${GRADLE_RETRY_DELAYS:-30 90}"
 [ "${#delays[@]}" -gt 0 ] || delays=(0)
 jitter="${GRADLE_RETRY_JITTER:-15}"
-pattern="${GRADLE_RETRY_PATTERN:-status code 429|Too Many Requests}"
+pattern="${GRADLE_RETRY_PATTERN:-Received status code 429}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

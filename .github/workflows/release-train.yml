@@ -364,8 +364,7 @@ jobs:
         working-directory: aster-lang-platform
         run: gradle-retry.sh ./gradlew publishToMavenLocal
 
-      # 依赖解析集中在这一步（限流时退避重试）；下面的测试步骤只剩运行期依赖。
-      # jre CLI fat jar 经 aster-api 的 composite 构建（与 aster-api CI unit job 相同）。
+      # 依赖解析主要在这一步；jre CLI fat jar 经 aster-api 的 composite 构建（与 aster-api CI unit job 相同）。
       - name: Build candidate jre CLI + aster-api test classes
         id: cli-jar
         working-directory: aster-api
@@ -392,7 +391,9 @@ jobs:
           set -euo pipefail
           args=()
           while IFS= read -r t; do [ -z "$t" ] || args+=(--tests "$t"); done <<<"$PARITY_TESTS"
-          ./gradlew :test "${args[@]}" "-Daster.cli.jar=${CLI_JAR}"
+          # 测试任务还会解析运行期依赖，同样经 gradle-retry.sh：只有 Gradle 报告仓库 429（「Received status code 429」）
+          # 才重跑，测试本身失败立即返回。
+          gradle-retry.sh ./gradlew :test "${args[@]}" "-Daster.cli.jar=${CLI_JAR}"
 
       # 每个过滤式都必须命中至少一个测试类（JUnit XML 文件名是 TEST-<类全名>.xml）。
       - name: Every parity filter ran
