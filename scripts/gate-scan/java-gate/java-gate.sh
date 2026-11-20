@@ -6,12 +6,12 @@
 #       aster-api 的 settings.gradle 会 composite 替换它们）构建 :replay，把测试运行时 classpath 写到 <文件>。
 #       用 gate-cp.init.gradle 注入任务，不改 aster-api 仓的任何文件。旧版、新版各建一份。
 #
-#   scan --old-cp <文件> --new-cp <文件> --sources <jsonl> [--sources …]
+#   scan --old-cp <文件> --new-cp <文件> --sources <jsonl> [--sources …] [--aliases <vocab.jsonl> …]
 #        [--ts-scan <scan 输出> | --ts-old-sources-ok N --ts-sources-total M] [--max-gap-pct P]
 #       用新版 classpath 编译 Main / Worker，再在两侧各自的隔离类加载器里编译每份源 × 每个 lexicon，报告差异。
 #       --ts-scan 给 gate-scan.sh scan 的输出文件（取其中 `old sources ok in any lexicon: N / M`），或直接给 N 与 M：
 #       M 必须等于本次的源数（同一份导出），Java 旧版在任一 lexicon 下能编译的源数与 N 差距超过 P%（缺省 5）即退出码 3
-#       （Java 结果作废，通常是缺语言包）。不给时打印 `sanity: SKIPPED`，只靠四个 lexicon 的预检。
+#       （Java 结果作废，通常是缺语言包）。不给时打印 `sanity: SKIPPED`，只靠四个 lexicon 的预检。--aliases 见 README「别名路径」。
 #
 # 只打印 id / kind / lexicon / 诊断码 / IR 键路径，从不打印源码。
 # 退出码：0 = PASS；1 = REVIEW（有需复核项）；2 = 用法错误；3 = 环境错误 / 结果不可信——只有 0 算通过。
@@ -74,12 +74,13 @@ check_cp() {
 
 cmd_scan() {
   local old_cp="" new_cp="" ts_scan="" ts_ok="" ts_total="" gap=""
-  local -a sources=()
+  local -a sources=() aliases=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --old-cp) need "$@"; old_cp="$2"; shift 2 ;;
       --new-cp) need "$@"; new_cp="$2"; shift 2 ;;
       --sources) need "$@"; sources+=("$2"); shift 2 ;;
+      --aliases) need "$@"; aliases+=("$2"); shift 2 ;;
       --ts-scan) need "$@"; ts_scan="$2"; shift 2 ;;
       --ts-old-sources-ok) need "$@"; ts_ok="$2"; shift 2 ;;
       --ts-sources-total) need "$@"; ts_total="$2"; shift 2 ;;
@@ -108,6 +109,7 @@ cmd_scan() {
   local -a args=(--old-cp "$old_cp" --new-cp "$new_cp")
   local s
   for s in "${sources[@]}"; do args+=(--sources "$s"); done
+  for s in ${aliases[@]+"${aliases[@]}"}; do args+=(--aliases "$s"); done
   [ -z "$ts_ok" ] || args+=(--ts-old-sources-ok "$ts_ok")
   [ -z "$ts_total" ] || args+=(--ts-sources-total "$ts_total")
   [ -z "$gap" ] || args+=(--max-gap-pct "$gap")

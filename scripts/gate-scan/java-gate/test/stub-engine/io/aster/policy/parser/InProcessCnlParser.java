@@ -1,7 +1,9 @@
 package io.aster.policy.parser;
 
+import aster.core.identifier.VocabularyScopes;
 import aster.core.ir.CoreModel;
 import aster.core.lexicon.LexiconRegistry;
+import aster.core.lexicon.SemanticTokenKind;
 import aster.core.typecheck.ErrorCode;
 import aster.core.typecheck.model.Diagnostic;
 import java.io.IOException;
@@ -21,6 +23,10 @@ import java.util.regex.Pattern;
  * 动作：Exxx = 解析错误，comma = E064(',')，resolve = 名称解析失败 E801，tc = 类型错误 E200，throw = 抛异常，
  * col = IR 列 +1，rename = IR 名字改变。{@code [lex:<id>]} 表示只在该 lexicon 下能解析。
  * 未注册的 lexicon 一律解析失败（UNCODED），与真实引擎在缺语言包时的表现一致。
+ * build 写成 oldalias / newalias / allalias 时只在带别名集的编译（{@link #parseWithUserAliases}）上生效。
+ *
+ * <p>java-gate.test.sh 另把本类连同 CnlErrorListener 改包名为 {@code aster.core.embed} 生成「core 内嵌解析器」桩，
+ * 验证门禁在 aster-api 删除副本之后按侧回落到 core 的解析器。
  */
 public final class InProcessCnlParser {
     private static final Logger LOG = Logger.getLogger(InProcessCnlParser.class.getName());
@@ -71,6 +77,16 @@ public final class InProcessCnlParser {
     }
 
     public static ParseResult parse(String source, String locale) {
+        return compile(source, locale, false);
+    }
+
+    public static ParseResult parseWithUserAliases(String source, String locale, VocabularyScopes scopes,
+                                                   Map<SemanticTokenKind, List<String>> aliasSet, boolean allowStructural) {
+        if (aliasSet == null || aliasSet.isEmpty() || !allowStructural) throw new IllegalStateException("stub: 需要非空别名集与 allowStructural");
+        return compile(source, locale, true);
+    }
+
+    private static ParseResult compile(String source, String locale, boolean aliased) {
         System.out.println("LEAK " + source);
         System.err.println("LEAK " + source);
         LOG.warning("LEAK " + source);
@@ -89,6 +105,10 @@ public final class InProcessCnlParser {
             if (who.equals("lex")) {
                 if (!what.equalsIgnoreCase(locale)) errors.add(new CnlErrorListener.Diagnostic("E050", Map.of()));
                 continue;
+            }
+            if (who.endsWith("alias")) {
+                if (!aliased) continue;
+                who = who.substring(0, who.length() - "alias".length());
             }
             if (!who.equals(BUILD) && !who.equals("all")) continue;
             if (onlyLex != null && !onlyLex.equalsIgnoreCase(locale)) continue;
