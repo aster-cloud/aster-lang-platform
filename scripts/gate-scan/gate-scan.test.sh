@@ -496,6 +496,12 @@ const cloud = [
   // 无法检查的记录
   row('cloudv:badalias', 'en-US', { aliasSet: '{not json SECRET_TEXT_x' }),
   row('cloudv:badembedded', 'en-US', { embedded: '[1,2]' }),
+  // 嵌套形状不符不得被静默跳过（否则藏住命中）：别名里的数组、缺 v、未知 kind、非字符串 localized、快照里的非字符串触发词
+  row('cloudv:badalias2', 'de-DE', { aliasSet: JSON.stringify({ TYPE_ALIAS: [['Typ']] }) }),
+  row('cloudv:badembedded2', 'zh-CN', { embedded: JSON.stringify({ terms: [lit('返回')] }) }),
+  row('cloudv:badembedded3', 'zh-CN', { embedded: emb({ kind: 'literalx', localized: '返回', canonical: 'x' }) }),
+  row('cloudv:badembedded4', 'zh-CN', { embedded: emb({ kind: 'literal', localized: ['返回'], canonical: 'x' }) }),
+  row('cloudv:badvocab', 'de-DE', { vocabularies: [vocab({ triggers: [['Typ']] })] }),
   row('cloudv:missing', 'de-DE', { vocabularies: [vocab({ found: false })] }),
   row('cloudv:clean', 'en-US'),
 ];
@@ -539,7 +545,7 @@ default_exports; vocab_exports
 : >"$FAKE_KUBECTL_LOG"
 run_script 0 export --out "$TMP/vx" --with-vocab
 expect_out "$TMP/vx/api-vocab.jsonl  2 rows"
-expect_out "$TMP/vx/cloud-vocab.jsonl  20 rows"
+expect_out "$TMP/vx/cloud-vocab.jsonl  25 rows"
 [ "$(wc -l <"$FAKE_KUBECTL_LOG")" -eq 4 ] || fail "export --with-vocab 应调用 kubectl 四次（源码×2、词汇×2）"
 [ "$(grep -c -- '-d aster_cloud -v cloud=1 -f -' "$FAKE_KUBECTL_LOG")" -eq 2 ] || fail "cloud 词汇导出应带 -v cloud=1"
 for f in api cloud api-vocab cloud-vocab; do
@@ -571,16 +577,16 @@ rm -rf "$TMP/vempty" "$TMP/vcut"
 
 CASE="vocab-check 规则命中与对照"
 run_check 1 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB"
-expect_hits 'api:d1/zh-CN/D1_trigger_keyword cloudterm:d3term/zh-CN/D3_vocab_trigger cloudv:badalias/en-US/unreadable_aliasSet cloudv:badembedded/en-US/unreadable_embedded cloudv:d1alias/en-US/D1_trigger_aliasSet cloudv:d1en/zh-CN/D1_trigger_keyword cloudv:d1fold/en-US/D1_trigger_keyword cloudv:d1kw/zh-CN/D1_trigger_keyword cloudv:d1nfc/hi-IN/D1_trigger_keyword cloudv:d1unknown/?/D1_trigger_keyword cloudv:d3alias/de-DE/D3_aliasSet cloudv:d3hi/hi-IN/D3_vocab_trigger cloudv:d3trig/zh-CN/D3_vocab_trigger cloudv:d3value/en-US/D3_vocab_value cloudv:missing/de-DE/missing_snapshot '
+expect_hits 'api:d1/zh-CN/D1_trigger_keyword cloudterm:d3term/zh-CN/D3_vocab_trigger cloudv:badalias/en-US/unreadable_aliasSet cloudv:badalias2/de-DE/unreadable_aliasSet cloudv:badembedded/en-US/unreadable_embedded cloudv:badembedded2/zh-CN/unreadable_embedded cloudv:badembedded3/zh-CN/unreadable_embedded cloudv:badembedded4/zh-CN/unreadable_embedded cloudv:badvocab/de-DE/unreadable_vocabulary cloudv:d1alias/en-US/D1_trigger_aliasSet cloudv:d1en/zh-CN/D1_trigger_keyword cloudv:d1fold/en-US/D1_trigger_keyword cloudv:d1kw/zh-CN/D1_trigger_keyword cloudv:d1nfc/hi-IN/D1_trigger_keyword cloudv:d1unknown/?/D1_trigger_keyword cloudv:d3alias/de-DE/D3_aliasSet cloudv:d3hi/hi-IN/D3_vocab_trigger cloudv:d3trig/zh-CN/D3_vocab_trigger cloudv:d3value/en-US/D3_vocab_value cloudv:missing/de-DE/missing_snapshot '
 ! grep -q -e 'ctl_' -e ':clean ' "$TMP/out" || fail "对照记录不应命中"
-expect_out '^records: cloud-policy-version=19 cloud-domain-term=1 api-policy-version=2$'
-expect_out '^lexicons: en-US=10 zh-CN=5 de-DE=3 hi-IN=2 ?=2$'
-expect_out '^per-rule: unreadable_aliasSet=1 unreadable_embedded=1 missing_snapshot=1 D1_trigger_keyword=6 D1_trigger_aliasSet=1 D3_aliasSet=1 D3_vocab_trigger=3 D3_vocab_value=1$'
-expect_out '^result: HITS (15 hits, 15 ids)$'
+expect_out '^records: cloud-policy-version=24 cloud-domain-term=1 api-policy-version=2$'
+expect_out '^lexicons: en-US=10 zh-CN=8 de-DE=5 hi-IN=2 ?=2$'
+expect_out '^per-rule: unreadable_aliasSet=2 unreadable_embedded=4 unreadable_vocabulary=1 missing_snapshot=1 D1_trigger_keyword=6 D1_trigger_aliasSet=1 D3_aliasSet=1 D3_vocab_trigger=3 D3_vocab_value=1$'
+expect_out '^result: HITS (20 hits, 20 ids)$'
 
 CASE="vocab-check 单个规则文件"
 run_check 1 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB" --rules "$HERE/vocab-rules/d3-type-alias-keyword.json"
-expect_hits 'cloudterm:d3term/zh-CN/D3_vocab_trigger cloudv:badalias/en-US/unreadable_aliasSet cloudv:badembedded/en-US/unreadable_embedded cloudv:d3alias/de-DE/D3_aliasSet cloudv:d3hi/hi-IN/D3_vocab_trigger cloudv:d3trig/zh-CN/D3_vocab_trigger cloudv:d3value/en-US/D3_vocab_value cloudv:missing/de-DE/missing_snapshot '
+expect_hits 'cloudterm:d3term/zh-CN/D3_vocab_trigger cloudv:badalias/en-US/unreadable_aliasSet cloudv:badalias2/de-DE/unreadable_aliasSet cloudv:badembedded/en-US/unreadable_embedded cloudv:badembedded2/zh-CN/unreadable_embedded cloudv:badembedded3/zh-CN/unreadable_embedded cloudv:badembedded4/zh-CN/unreadable_embedded cloudv:badvocab/de-DE/unreadable_vocabulary cloudv:d3alias/de-DE/D3_aliasSet cloudv:d3hi/hi-IN/D3_vocab_trigger cloudv:d3trig/zh-CN/D3_vocab_trigger cloudv:d3value/en-US/D3_vocab_value cloudv:missing/de-DE/missing_snapshot '
 
 CASE="vocab-check 无命中"
 node -e '

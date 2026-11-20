@@ -11,8 +11,9 @@
 // 折叠相等：两侧先 NFC，再用带 u + i 标志的正则比较——JS 在 u 模式下按 Unicode 简单大小写折叠（CaseFolding C+S）比较，
 // 与引擎 foldKey 同一口径（PR 正文以 PCRE (*UCP)(?i) 近似）。
 //
-// 无法检查的记录也会报告（退出码 1）：unreadable_aliasSet（aliasSet 不是 kind→[别名] 的 JSON）、unreadable_embedded
-// （内嵌词汇不是 {terms:[...]} 的 JSON）、missing_snapshot（引用的词汇快照不存在）。
+// 无法检查的记录也会报告（退出码 1），任何一处形状不符都整条判为不可读，不跳过：unreadable_aliasSet（aliasSet 不是
+// kind→[字符串] 的 JSON）、unreadable_embedded（内嵌词汇不符合 ADR 0060 §6.1：v=1、terms 每项有已知 kind 与字符串
+// localized / canonical）、unreadable_vocabulary（快照 / 冻结词汇投影出非字符串的触发词或规范名）、missing_snapshot（引用的快照不存在）。
 //
 // 用法：node vocab-check.mjs --sources <cloud-vocab.jsonl> --sources <api-vocab.jsonl> [--rules <json> ...] [--allow-empty-api]
 //       缺省 --rules 为 vocab-rules/ 下全部 *.json。
@@ -31,10 +32,11 @@ const LEXICONS = ['en-US', 'zh-CN', 'de-DE', 'hi-IN'];
 const UNKNOWN = '?';
 const SUBJECTS = new Set(['aliasSet', 'literalTriggers', 'triggers', 'values']);
 const AGAINST = new Set(['spellings', 'aliasSet']);
-const PROBLEM_RULES = ['unreadable_aliasSet', 'unreadable_embedded', 'missing_snapshot'];
+const PROBLEM_RULES = ['unreadable_aliasSet', 'unreadable_embedded', 'unreadable_vocabulary', 'missing_snapshot'];
+const EMBEDDED_KINDS = new Set(['struct', 'field', 'function', 'enum_value', 'literal']);
 
 const nfc = s => s.normalize('NFC');
-const strings = value => (Array.isArray(value) ? value.filter(v => typeof v === 'string') : []);
+const isStringArray = value => Array.isArray(value) && value.every(v => typeof v === 'string');
 const isObject = value => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** 折叠相等的匹配器（见文件头）：u 模式只允许转义语法字符，因此只转义它们。 */
@@ -101,34 +103,38 @@ function defaultRuleFiles() {
   return files;
 }
 
-/** aliasSet 原文 → 全部别名；不是 kind→[别名] 的 JSON 时返回 undefined。 */
-function parseAliasSet(text) {
-  if (text === null || text === undefined) return [];
+const parseJson = text => {
   try {
-    const doc = JSON.parse(text);
-    if (!isObject(doc) || !Object.values(doc).every(Array.isArray)) return undefined;
-    return Object.values(doc).flatMap(strings);
+    return { doc: JSON.parse(text) };
   } catch {
     return undefined;
   }
+};
+
+/** aliasSet 原文 → 全部别名；不是 kind→[字符串] 的 JSON 时返回 undefined（不丢弃任何元素）。 */
+function parseAliasSet(text) {
+  if (text === null || text === undefined) return [];
+  const parsed = parseJson(text);
+  if (!parsed || !isObject(parsed.doc) || !Object.values(parsed.doc).every(isStringArray)) return undefined;
+  return Object.values(parsed.doc).flat();
 }
 
-/** 内嵌词汇原文（ADR 0060 §6.1）→ 触发词与规范名；不是 {terms:[...]} 的 JSON 时返回 undefined。 */
+/** 内嵌词汇的一项是否符合 §6.1（aliases 不属于格式，出现时也须是字符串数组，以免漏查）。 */
+const validTerm = term => isObject(term) && EMBEDDED_KINDS.has(term.kind) && typeof term.localized === 'string'
+  && typeof term.canonical === 'string' && (term.aliases === undefined || isStringArray(term.aliases));
+
+/** 内嵌词汇原文（ADR 0060 §6.1）→ 触发词与规范名；任一处形状不符时返回 undefined。 */
 function parseEmbedded(text) {
   const out = { literalTriggers: [], triggers: [], values: [] };
   if (text === null || text === undefined) return out;
-  let doc;
-  try {
-    doc = JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-  if (!isObject(doc) || !Array.isArray(doc.terms) || !doc.terms.every(isObject)) return undefined;
+  const parsed = parseJson(text);
+  const doc = parsed?.doc;
+  if (!isObject(doc) || doc.v !== 1 || !Array.isArray(doc.terms) || !doc.terms.every(validTerm)) return undefined;
   for (const term of doc.terms) {
-    const triggers = strings([term.localized, ...(Array.isArray(term.aliases) ? term.aliases : [])]);
+    const triggers = [term.localized, ...(term.aliases ?? [])];
     out.triggers.push(...triggers);
     if (term.kind === 'literal') out.literalTriggers.push(...triggers);
-    out.values.push(...strings([term.canonical]));
+    out.values.push(term.canonical);
   }
   return out;
 }
@@ -157,9 +163,14 @@ function toRecord(row) {
   };
   for (const vocab of row.vocabularies) {
     if (vocab.found === false) problems.push('missing_snapshot');
-    record.literalTriggers.push(...strings(vocab.literalTriggers));
-    record.triggers.push(...strings(vocab.triggers));
-    record.values.push(...strings(vocab.values));
+    const lists = ['literalTriggers', 'triggers', 'values'].map(key => vocab[key] ?? []);
+    if (!lists.every(isStringArray)) {
+      problems.push('unreadable_vocabulary');
+      continue;
+    }
+    record.literalTriggers.push(...lists[0]);
+    record.triggers.push(...lists[1]);
+    record.values.push(...lists[2]);
   }
   record.problems = [...new Set(problems)];
   record.aliasMatcher = foldMatcher(record.aliasSet);

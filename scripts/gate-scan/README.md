@@ -339,7 +339,8 @@ lexicon 打印为 `?`。
 | `d3-type-alias-keyword.json` | `D3_aliasSet` / `D3_vocab_trigger` / `D3_vocab_value` | aliasSet 别名 / 词汇触发词 / 规范名等于 `类型`、`Typ`、`प्रकार`（不分 locale） |
 
 输出 `records:` 与 `lexicons:` 计数，每个命中一行 `hit <id> <kind> <lexicon> <规则名>`，再 `per-rule:` 与 `result: PASS|HITS (...)`；
-**从不打印触发词、别名或词汇内容**。无法检查的记录同样报告：`unreadable_aliasSet`、`unreadable_embedded`、`missing_snapshot`。
+**从不打印触发词、别名或词汇内容**。无法检查的记录同样报告（任何嵌套形状不符都整条判为不可读，不静默跳过）：
+`unreadable_aliasSet`、`unreadable_embedded`、`unreadable_vocabulary`、`missing_snapshot`。
 退出码 0 无命中、1 有命中、2 用法错误、3 导出 / 规则文件损坏或 cloud 导出为空（api 为空需 `--allow-empty-api`）。
 
 ### 先自测再信任生产结果
