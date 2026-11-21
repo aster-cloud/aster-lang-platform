@@ -353,7 +353,18 @@ group = "cloud.aster-lang"
 //   test:npm 2.7.0 无变更）。runtime / validation / locales / hi / truffle 源码无变更，lockstep 重新打 tag；ts npm 3.6.0
 //   （v3.6.0 后 main 无提交）、ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，本次不发布。
 //
-version = "1.0.54"
+// 1.0.55：Wave C 双引擎 parity 收尾（core#298、ts#357 第 3 行、ts#380、test#174 第 5 项、aster-api#594）。core：
+//   the result is 之后的分隔空白只认空格与 tab（#306，收紧：VT / FF / 换行不再被改写）；声明头与语句中间换行的 parity
+//   夹具（#307）；类型别名右侧在 TYPE 位置解析，查不到报 E800（#308，收紧）；类型别名前的声明级注解报 E056（#309，
+//   收紧）；任何块头之后都可以先空行再写块（#310，放宽）；名称解析前后检查解析预算、各阶段线性度模糊测试（#311，
+//   预算之内结果不变）。公开 API 不变。truffle：GraalVM native 可执行构建与 native conformance 门（#201，ADR 0063；
+//   org.graalvm.sdk 组对齐 catalog graalvm 版本、native-image 元数据改为生成，不发布 native 产物）；确定性调用深度上限
+//   10 000，与 Node CLI 同计数、同报错（#202，ADR 0063；求值线程栈 64 MiB）。test：Wave C 语料（#252）。ts npm
+//   3.6.0 → 3.7.0（minor：既有源码新拒绝 E063 / E052 / E800，en-US / de-DE 启用 result-is 与 english-possessive；
+//   公开 exports 不变）；test:npm 2.7.0 → 2.8.0（minor：语料只增，另有两份 zh 样本改用汉字标识符）。runtime /
+//   validation / locales / hi 源码无变更，lockstep 重新打 tag；ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，本次不发布。
+//
+version = "1.0.55"
 
 catalog {
     versionCatalog {
@@ -369,7 +380,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.54")
+        version("asterLang", "1.0.55")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
