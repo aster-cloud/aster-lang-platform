@@ -10,6 +10,7 @@ aster-lang-ts 构建编译一遍，报告编译结论发生变化的策略。报
 | `export-profile-impact.sql` | `input-refs` 用：cloud 库每个源的租户与近 30 天需审批执行数；aster_api 库的签名事实签发方（不含公钥） |
 | `export-profile-ids.sql` | `input-refs` 用：cloud 库中源码头部声明了档案的 id（独立于编译器的对账集合） |
 | `export-vocab.sql` | `export --with-vocab` 用：每个版本 / 词条的语言、aliasSet、内嵌词汇与引用快照的触发词与规范名（不含源码） |
+| `export-layouts.sql` | `export --with-layouts` 用：aster-cloud 每个有显示排版的版本的语言与排版原文（不含源码） |
 | `scan.mjs` | 比较两个 ts 构建上的诊断码集合，只打印 id / kind / lexicon / 诊断码 |
 | `input-refs.mjs` | 列出档案模块每条 Verdict 规则的 `inputRefs`，标出 `*` / `""`，合入影响面并对账 |
 | `common.mjs` | `scan.mjs` 与 `input-refs.mjs` 共用：构建 / lexicon 加载、静默编译、导出校验、源计数 |
@@ -18,6 +19,7 @@ aster-lang-ts 构建编译一遍，报告编译结论发生变化的策略。报
 | `ir-diff.mjs` | 补充扫描：两个 ts 构建上 `compileAndTypecheck` 的结论、类型诊断与规范 Core IR 差异 |
 | `regex-scan.mjs` | 补充扫描：按规则文件对导出逐行跑 PCRE 预筛，只打印 id / kind / 规则名 |
 | `vocab-check.mjs` + `vocab-rules/` | 补充扫描：字面量触发词 / 词汇 / aliasSet 与关键词拼写的碰撞，只打印 id / kind / lexicon / 规则名 |
+| `layout-check.mjs` | 补充扫描：会被 L10 / 名字转义重新判定的存量显示排版（G5），只打印 id / kind / lexicon / 规则名 |
 | `corpus-to-jsonl.mjs` | 把 aster-lang-test 语料写成导出格式，供补充扫描在不碰生产数据的前提下自测 |
 
 ## 何时运行
@@ -355,6 +357,50 @@ lexicon 打印为 `?`。
 `unreadable_aliasSet`、`unreadable_embedded`、`unreadable_vocabulary`、`missing_snapshot`。
 退出码 0 无命中、1 有命中、2 用法错误、3 导出 / 规则文件损坏或 cloud 导出为空（api 为空需 `--allow-empty-api`）。
 
+### 存量显示排版（`layout-check.mjs`，Wave D G5）
+
+ADR 0059 修订 5 的 L10（隐藏转义定界符）与 ADR 0064 的名字转义上线前，确认生产里没有会被它们重新判定的显示排版。
+排版不是编译输入，源码扫描与 Java 门禁都看不到它：先带 `--with-layouts` 导出，再检查：
+
+```bash
+D=~/gate-scan-export-layouts
+mkdir -m 700 "$D"
+scripts/gate-scan/gate-scan.sh export --out "$D" --with-layouts --allow-empty-api-db
+node scripts/gate-scan/layout-check.mjs --sources "$D/cloud-layouts.jsonl"
+rm -rf "$D"
+```
+
+`export-layouts.sql` 与其它导出同一条路径（`kubectl exec` + `READ ONLY` 事务 + `{"_count" : N}` 完成标记），**只查 aster_cloud 库**：
+排版只存在 aster-cloud（`src/db/schema.ts` 的 `policyVersionLayouts`，表 `"PolicyVersionLayout"`，迁移 `drizzle/0068_policy_version_layout.sql`，
+ADR 0058 §7.2）；aster-api 不落库，排版随导出请求 `PackageExportRequest.layout` 传入（ADR 0059 修订 4 D12）。不带 `-v cloud=1` 执行时 SQL 直接报错。
+不导出源码，每行：
+
+| 字段 | 来源 |
+| --- | --- |
+| `id` / `kind` | `cloudv:<"PolicyVersion".id>` / `cloud-policy-version-layout`（只含有排版的版本，`"PolicyVersionLayout"` 每行一条） |
+| `lexicon` | 与 `export-vocab.sql` 同法反推：重算 `sourceEnvelopeSha256`，否则取引用快照唯一的 locale，否则为空（打印为 `?`） |
+| `layout` | `"PolicyVersionLayout".layout` 原文（`serializeLayout` 的逐字节输出 `{"v":1,"spans":[{"text"} \| {"canonical","display"}]}`） |
+
+display 文本与 canonical 文本都不另外存列：它们是各 span 的 display / canonical 侧依次拼接（ts `./layout` 的 `toDisplay` / `toCanonical`），
+由 `layout-check.mjs` 从 `layout` 推出。排版 0 行是合法状态（生产可能从未保存过排版），导出放行；同一次 `export` 的 `cloud.jsonl`
+仍按「不得为空」校验，以此证明连对了库。`layout-check.mjs` 对 0 行要求显式 `--allow-empty`。
+
+排版按 ts `readLayout` 的口径解析（恰为 `{v:1, spans}`、spans 非空、span 恰为两种形态之一）。反引号指 U+0060，全角反引号指 U+FF40。
+
+| 类别 | 规则 | 含义 |
+| --- | --- | --- |
+| 门禁（`hit`，期望 0） | `G5a_structural_backtick` | 结构 span 的 `canonical` 含反引号（计划 G5a；L10a 第 2 条只允许恰为 `` "`" ``、`display` 为 `""` 的三元组形状） |
+| | `G5b_display_backtick` | 结构 span 的 `display` 含反引号（计划 G5b；L10a 第 1 条，防止把关键词显示成转义名） |
+| | `unreadable_layout` | `layout` 不是合法 JSON 或形状不符（整条不可检查，不静默跳过） |
+| 分诊（`note`，逐条确认） | `content_backtick` | 内容 span 含反引号：canonical 与 display 里已有的反引号（今天只可能在字符串 / 注释里），E1 的转义不透明性必须让它们保持原义 |
+| | `fullwidth_backtick` | 任何 span 的 canonical 或 display 含全角反引号：两个 canonicalizer 今天会把它折叠成反引号（Wave D 探针 F2），zh 的 `｀x｀` 不得成为转义定界符 |
+
+输出 `records:` 与 `lexicons:` 计数，门禁命中每行 `hit <id> <kind> <lexicon> <规则名>`，分诊项每行 `note <id> <kind> <lexicon> <规则名>`，
+再 `per-rule:` 与 `result: PASS|HITS (...)`；**从不打印排版、display 或 canonical 文本**。存量排版读取时只复验哈希与往返
+（aster-cloud `src/lib/policy-layout/store.ts`），所以门禁命中不会让读取失败，影响的是该版本的下一次保存，以及 aster-api 升级到含 L10
+的引擎后导出策略包（`PackageLayoutGate` 省略排版，原因 `display_rules_failed`）；按 id 列出交给负责人处理。
+退出码 0 无门禁命中（分诊项不影响退出码）、1 有门禁命中、2 用法错误、3 导出损坏或 0 行且未给 `--allow-empty`。
+
 ### 先自测再信任生产结果
 
 每轮补充扫描先在 aster-lang-test 语料上跑一遍，再为本轮每个风险各写一份合成源，确认每个风险都能被检出：
@@ -372,13 +418,14 @@ node scripts/gate-scan/corpus-to-jsonl.mjs ~/IdeaProjects/aster-lang-test /tmp/c
 - 分步模式：导出文件以 600 权限写入 `--out`；`scan` 结束时删除 `--sources` 下的导出（`--keep` 除外）。
   导出端的那份需要按上面的步骤手工删除——**两台机器上都不要留导出**。
 - `--with-vocab` 的两份导出不含源码，但含别名与词汇原文：与源码导出同样对待（600 权限、只放在 700 目录、检查后删除）。
+- `--with-layouts` 的导出不含 `content` 列，但排版里的内容 span 就是源码原文：与源码导出同样对待。
 - `compile()` 期间屏蔽 console 与 stdout / stderr，输出只含 id、kind、lexicon 与诊断码（`input-refs` 另有模块名、规则名、
   引用路径、租户 id 与计数），**从不打印源码内容**；扫描结果可以直接贴到 issue / PR。
 
 ## 测试
 
 ```bash
-bash scripts/gate-scan/gate-scan.test.sh   # 假构建 + 假 kubectl，覆盖各分组、各失败路径、分步往返、--with-vocab 与 vocab-check
+bash scripts/gate-scan/gate-scan.test.sh   # 假构建 + 假 kubectl，覆盖各分组、各失败路径、分步往返、--with-vocab 与 vocab-check、--with-layouts 与 layout-check
 GATE_SCAN_OLD_TS=<v1.4.0 构建> GATE_SCAN_NEW_TS=<fix/250 构建> bash scripts/gate-scan/gate-scan.test.sh   # 加真实构建
 ```
 

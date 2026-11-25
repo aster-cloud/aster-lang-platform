@@ -92,9 +92,10 @@ echo "$*" >>"$FAKE_KUBECTL_LOG"
 sql="$(cat)"
 grep -q 'READ ONLY' <<<"$sql" || { echo "shim: SQL 不是只读事务" >&2; exit 9; }
 [ "${FAKE_KUBECTL_FAIL:-}" = 1 ] && { echo "shim: error: unable to upgrade connection" >&2; exit 1; }
-# 按 SQL 内容区分四种导出：源码（export-policy-sources）、影响面（export-profile-impact）、对账集合（export-profile-ids）、
-# 词汇（export-vocab）
-if grep -q 'vocabularies' <<<"$sql"; then what=VOCAB
+# 按 SQL 内容区分五种导出：源码（export-policy-sources）、影响面（export-profile-impact）、对账集合（export-profile-ids）、
+# 词汇（export-vocab）、排版（export-layouts）
+if grep -q 'PolicyVersionLayout' <<<"$sql"; then what=LAYOUT
+elif grep -q 'vocabularies' <<<"$sql"; then what=VOCAB
 elif grep -q 'gatedExecutions30d' <<<"$sql"; then what=IMPACT
 elif grep -q 'Profil' <<<"$sql"; then what=IDS
 else what=SRC; fi
@@ -106,6 +107,7 @@ case "$what: $* " in
   "IDS:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_IDS_JSONL" ;;
   "VOCAB:"*" -d aster_api "*) cat "$FAKE_API_VOCAB_JSONL" ;;
   "VOCAB:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_VOCAB_JSONL" ;;
+  "LAYOUT:"*" -d aster_cloud -v cloud=1 "*) cat "$FAKE_CLOUD_LAYOUT_JSONL" ;;
   *) echo "shim: 未知库 / 导出 $what $*" >&2; exit 9 ;;
 esac
 EOF
@@ -612,6 +614,170 @@ printf '{"rules":[{"name":"X","subject":"triggers","against":"spellings"}],"spel
 run_check 3 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB" --rules "$TMP/bad-rules.json"; expect_err '未知 locale fr-FR'
 printf '{"rules":[{"name":"missing_snapshot","subject":"triggers","against":"aliasSet"}]}\n' >"$TMP/bad-rules.json"
 run_check 3 --sources "$CLOUD_VOCAB" --sources "$API_VOCAB" --rules "$TMP/bad-rules.json"; expect_err '保留名冲突'
+default_exports
+
+# ---------- 存量显示排版（export --with-layouts + layout-check.mjs，Wave D G5） ----------
+# 合成导出：字段与 export-layouts.sql 相同；排版里的文字都带 SECRET_TEXT_ 标记或中文诗句，用来验证 layout-check
+# 只打印 id / kind / lexicon / 规则名。
+CLOUD_LAYOUT="$TMP/cloud-layouts.jsonl"
+export FAKE_CLOUD_LAYOUT_JSONL="$CLOUD_LAYOUT"
+cat >"$TMP/mklayout.mjs" <<'EOF'
+import { writeFileSync } from 'node:fs';
+const [out] = process.argv.slice(2);
+const T = text => ({ text });
+const S = (canonical, display) => ({ canonical, display });
+const lay = (...spans) => JSON.stringify({ v: 1, spans });
+const row = (id, lexicon, layout) => ({ id, kind: 'cloud-policy-version-layout', lexicon, layout });
+const rows = [
+  // G5a：结构 span 的 canonical 含反引号——恰为 L10 三元组形状、与空格合并（E11）、JSON 里写成 ` 转义
+  row('cloudv:g5a_triple', 'zh-CN', lay(T('SECRET_TEXT_床前'), S('`', ''), T('当'), S('`', ''), T('明月光'))),
+  row('cloudv:g5a_merged', 'zh-CN', lay(S(' `', ''), T('SECRET_TEXT_版本'), S('`', ''))),
+  row('cloudv:g5a_escaped', 'en-US', '{"v":1,"spans":[{"canonical":"\\u0060","display":""},{"text":"SECRET_TEXT_x"}]}'),
+  // G5b：结构 span 的 display 含反引号——把关键词伪装成转义名（E14）、display 恰为反引号（E13）
+  row('cloudv:g5b_disguise', 'zh', lay(S('如果', '`如果`'), T(' SECRET_TEXT_x'))),
+  row('cloudv:g5b_tick', 'de-DE', lay(S('wenn', '`'), T(' SECRET_TEXT_x'))),
+  // 同时命中 G5a 与 G5b
+  row('cloudv:g5ab', 'en-US', lay(S('`', '`'), T('SECRET_TEXT_x'), S('`', '`'))),
+  // 分诊：内容 span 里的反引号（字符串 / 注释）、全角反引号在内容 / 结构 display / 结构 canonical 里
+  row('cloudv:note_content', 'en-US', lay(T('Return "SECRET_TEXT_`x`".'))),
+  row('cloudv:note_fw_text', 'zh-CN', lay(T('SECRET_TEXT_｀版本｀'))),
+  row('cloudv:note_fw_display', null, lay(S('If', '｀若｀'), T(' SECRET_TEXT_x'))),
+  row('cloudv:note_fw_canon', 'hi-IN', lay(S('｀', ' '), T('SECRET_TEXT_x'))),
+  // 门禁 + 分诊
+  row('cloudv:mixed', 'zh-CN', lay(S('`', ''), T('SECRET_TEXT_`当'), S('`', ''))),
+  // 无法检查：不是 JSON、多余键、v≠1、spans 为空、span 多键 / 空 text / 空 canonical / display 非串
+  row('cloudv:bad_json', 'en-US', '{"v":1,"spans":[SECRET_TEXT_'),
+  row('cloudv:bad_keys', 'en-US', JSON.stringify({ v: 1, spans: [T('SECRET_TEXT_x')], extra: 1 })),
+  row('cloudv:bad_v', 'en-US', JSON.stringify({ v: 2, spans: [T('SECRET_TEXT_x')] })),
+  row('cloudv:bad_empty', 'en-US', lay()),
+  row('cloudv:bad_span', 'en-US', lay({ text: 'SECRET_TEXT_x', canonical: 'a', display: 'b' })),
+  row('cloudv:bad_text', 'en-US', lay(T(''))),
+  row('cloudv:bad_canon', 'en-US', lay(S('', 'SECRET_TEXT_x'))),
+  row('cloudv:bad_display', 'en-US', lay(S('If', null))),
+  // 对照：普通排版、隐藏空格、全角的其它字符
+  row('cloudv:ctl_plain', 'zh-CN', lay(T('SECRET_TEXT_床前明月光'), S('。\n', '，'), T('疑是地上霜'))),
+  row('cloudv:ctl_hidden_space', 'en-US', lay(T('Return'), S(' ', ''), T('SECRET_TEXT_x.'))),
+  row('cloudv:ctl_fullwidth', 'zh-CN', lay(T('SECRET_TEXT_（版本）'), S('如果', '＂若＂'))),
+];
+writeFileSync(out, [...rows.map(r => JSON.stringify(r)), `{"_count" : ${rows.length}}`].join('\n') + '\n');
+EOF
+layout_exports() { node "$TMP/mklayout.mjs" "$CLOUD_LAYOUT"; }
+LAYOUT_CHECK="$HERE/layout-check.mjs"
+run_layout_check() {  # 期望退出码, layout-check 参数...
+  local want="$1"; shift
+  local rc=0
+  node "$LAYOUT_CHECK" "$@" >"$TMP/out" 2>"$TMP/err" || rc=$?
+  [ "$rc" -eq "$want" ] || fail "layout-check $* 期望 rc=${want}，实际 rc=${rc}"
+  ! grep -q -F -e SECRET_TEXT -e '`' -e '｀' -e '当' -e '如果' -e '版本' -e 'wenn' "$TMP/out" "$TMP/err" \
+    || fail "输出泄露了排版 / display / canonical 文本"
+}
+lines_of() { grep "^$1 " "$TMP/out" | awk '{print $2 "/" $4 "/" $5}' | sort | tr '\n' ' ' || true; }
+expect_lines() { [ "$(lines_of "$1")" = "$2" ] || fail "$1 行应为 '$2'，实际 '$(lines_of "$1")'"; }
+
+CASE="--with-layouts 用法"
+run_script 2 --old-ts a --new-ts b --with-layouts
+run_script 2 scan --sources "$TMP/x" --old-ts a --new-ts b --with-layouts
+run_script 2 input-refs --ts a --profile p --with-layouts
+run_script 0 --help; expect_out '--with-layouts'
+
+CASE="--with-layouts dry-run"
+: >"$FAKE_KUBECTL_LOG"
+run_script 0 export --out "$TMP/never" --with-layouts --dry-run
+expect_out "-d aster_cloud -v cloud=1 -f - < .*export-layouts.sql > .*cloud-layouts.jsonl"
+! grep -q -e "-d aster_api .*export-layouts.sql" "$TMP/out" || fail "aster_api 不存排版，不应导出"
+[ ! -e "$TMP/never" ] || fail "export --dry-run 不应创建目录"
+[ ! -s "$FAKE_KUBECTL_LOG" ] || fail "dry-run 不应调用 kubectl"
+
+CASE="export --with-layouts"
+default_exports; layout_exports
+: >"$FAKE_KUBECTL_LOG"
+run_script 0 export --out "$TMP/lx" --with-layouts
+expect_out "$TMP/lx/cloud-layouts.jsonl  22 rows"
+[ "$(wc -l <"$FAKE_KUBECTL_LOG")" -eq 3 ] || fail "export --with-layouts 应调用 kubectl 三次（源码×2、排版×1）"
+[ "$(grep -c -- '-d aster_cloud -v cloud=1 -f -' "$FAKE_KUBECTL_LOG")" -eq 2 ] || fail "cloud 排版导出应带 -v cloud=1"
+for f in api cloud cloud-layouts; do
+  perm="$(ls -l "$TMP/lx/$f.jsonl" | cut -c1-10)"
+  [ "$perm" = "-rw-------" ] || fail "$f.jsonl 权限应为 600，实际 $perm"
+done
+rm "$TMP/lx/api.jsonl" "$TMP/lx/cloud.jsonl"
+run_script 3 export --out "$TMP/lx" --with-layouts; expect_err '已有 api.jsonl'   # 只剩排版导出也拒绝覆盖
+[ -f "$TMP/lx/cloud-layouts.jsonl" ] || fail "拒绝覆盖时不应删除已有导出"
+run_layout_check 1 --sources "$TMP/lx/cloud-layouts.jsonl"
+expect_out '^result: HITS'
+rm -rf "$TMP/lx"
+vocab_exports
+: >"$FAKE_KUBECTL_LOG"
+run_script 0 export --out "$TMP/lvx" --with-vocab --with-layouts
+[ "$(wc -l <"$FAKE_KUBECTL_LOG")" -eq 5 ] || fail "--with-vocab --with-layouts 应调用 kubectl 五次"
+expect_out "$TMP/lvx/cloud-vocab.jsonl  25 rows"
+expect_out "$TMP/lvx/cloud-layouts.jsonl  22 rows"
+rm -rf "$TMP/lvx"
+
+CASE="--with-layouts 导出截断、空导出与失败"
+head -n 3 "$CLOUD_LAYOUT" >"$TMP/cl-cut.jsonl"
+FAKE_CLOUD_LAYOUT_JSONL="$TMP/cl-cut.jsonl" run_script 3 export --out "$TMP/lcut" --with-layouts
+expect_err '应恰好有 1 行完成标记'
+[ -z "$(ls -A "$TMP/lcut")" ] || fail "排版导出截断时应删除全部部分导出"
+{ head -n 3 "$CLOUD_LAYOUT"; echo '{"_count" : 4}'; } >"$TMP/cl-short.jsonl"
+FAKE_CLOUD_LAYOUT_JSONL="$TMP/cl-short.jsonl" run_script 3 export --out "$TMP/lcut" --with-layouts
+expect_err '完成标记 4 行，实际 3 行'
+[ -z "$(ls -A "$TMP/lcut")" ] || fail "排版导出行数不符时应删除全部部分导出"
+FAKE_CLOUD_LAYOUT_JSONL="$TMP/empty.jsonl" run_script 0 export --out "$TMP/lempty" --with-layouts
+expect_out "cloud-layouts.jsonl  0 rows"
+run_layout_check 3 --sources "$TMP/lempty/cloud-layouts.jsonl"; expect_err '排版记录为 0'
+run_layout_check 0 --sources "$TMP/lempty/cloud-layouts.jsonl" --allow-empty
+expect_out '^records: cloud-policy-version-layout=0$'
+expect_out '^result: PASS (0 hits, 0 notes)$'
+rm -rf "$TMP/lempty"
+# 源码导出（cloud）为空时整个导出失败：排版的 0 行放行依赖它证明连对了库
+jsonl "$CLOUD"
+run_script 3 export --out "$TMP/lempty" --with-layouts --allow-empty-api-db; expect_err 'aster_cloud 导出为 0 行'
+[ -z "$(ls -A "$TMP/lempty")" ] || fail "cloud 源码导出为空时应删除部分导出"
+default_exports
+FAKE_KUBECTL_FAIL=1 run_script 3 export --out "$TMP/lfail" --with-layouts
+[ -z "$(ls -A "$TMP/lfail")" ] || fail "kubectl 失败时应删除部分导出"
+rm -rf "$TMP/lempty" "$TMP/lcut" "$TMP/lfail"
+
+CASE="export-layouts.sql 形状"
+SQL_LAYOUTS_FILE="$HERE/export-layouts.sql"
+grep -q 'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;' "$SQL_LAYOUTS_FILE" || fail "排版导出必须在 READ ONLY 事务里"
+grep -q "json_build_object('_count', count(\*))" "$SQL_LAYOUTS_FILE" || fail "排版导出必须带 _count 完成标记"
+grep -q 'RAISE EXCEPTION' "$SQL_LAYOUTS_FILE" || fail "不带 -v cloud=1 时排版导出必须报错"
+# 输出键只能是 id / kind / lexicon / layout（content 只出现在 envelope 重算里，形如 ->>'content'）
+! grep -q -E "(^|[[:space:](,])'(content|source)'[[:space:]]*," "$SQL_LAYOUTS_FILE" || fail "排版导出不得输出源码列"
+[ "$(grep -o -E "^ +'[a-zA-Z]+', " "$SQL_LAYOUTS_FILE" | tr -d " ,'" | tr '\n' ' ')" = "id kind lexicon layout " ] \
+  || fail "排版导出的键应恰为 id kind lexicon layout"
+
+CASE="layout-check 规则命中与对照"
+run_layout_check 1 --sources "$CLOUD_LAYOUT"
+expect_lines hit 'cloudv:bad_canon/en-US/unreadable_layout cloudv:bad_display/en-US/unreadable_layout cloudv:bad_empty/en-US/unreadable_layout cloudv:bad_json/en-US/unreadable_layout cloudv:bad_keys/en-US/unreadable_layout cloudv:bad_span/en-US/unreadable_layout cloudv:bad_text/en-US/unreadable_layout cloudv:bad_v/en-US/unreadable_layout cloudv:g5a_escaped/en-US/G5a_structural_backtick cloudv:g5a_merged/zh-CN/G5a_structural_backtick cloudv:g5a_triple/zh-CN/G5a_structural_backtick cloudv:g5ab/en-US/G5a_structural_backtick cloudv:g5ab/en-US/G5b_display_backtick cloudv:g5b_disguise/zh-CN/G5b_display_backtick cloudv:g5b_tick/de-DE/G5b_display_backtick cloudv:mixed/zh-CN/G5a_structural_backtick '
+expect_lines note 'cloudv:mixed/zh-CN/content_backtick cloudv:note_content/en-US/content_backtick cloudv:note_fw_canon/hi-IN/fullwidth_backtick cloudv:note_fw_display/?/fullwidth_backtick cloudv:note_fw_text/zh-CN/fullwidth_backtick '
+! grep -q 'ctl_' "$TMP/out" || fail "对照记录不应命中"
+expect_out '^records: cloud-policy-version-layout=22$'
+expect_out '^lexicons: en-US=12 zh-CN=7 de-DE=1 hi-IN=1 ?=1$'
+expect_out '^per-rule: unreadable_layout=8 G5a_structural_backtick=5 G5b_display_backtick=3 content_backtick=2 fullwidth_backtick=3$'
+expect_out '^result: HITS (16 hits, 15 ids, 5 notes)$'
+
+CASE="layout-check 只有分诊项时退出 0"
+grep -e note_ -e ctl_ "$CLOUD_LAYOUT" >"$TMP/notes-layouts.jsonl"
+echo "{\"_count\" : $(wc -l <"$TMP/notes-layouts.jsonl" | tr -d ' ')}" >>"$TMP/notes-layouts.jsonl"
+run_layout_check 0 --sources "$TMP/notes-layouts.jsonl"
+expect_lines note 'cloudv:note_content/en-US/content_backtick cloudv:note_fw_canon/hi-IN/fullwidth_backtick cloudv:note_fw_display/?/fullwidth_backtick cloudv:note_fw_text/zh-CN/fullwidth_backtick '
+expect_out '^result: PASS (0 hits, 4 notes)$'
+
+CASE="layout-check 输入错误"
+run_layout_check 2
+run_layout_check 2 --sources "$CLOUD_LAYOUT" --bogus
+run_layout_check 3 --sources "$TMP/no-such.jsonl"; expect_err '不存在'
+run_layout_check 3 --sources "$CLOUD_LAYOUT" --sources "$CLOUD_LAYOUT"; expect_err '记录 id 重复'
+run_layout_check 3 --sources "$TMP/cl-cut.jsonl"; expect_err '应恰好有 1 行完成标记'
+run_layout_check 3 --sources "$TMP/cl-short.jsonl"; expect_err '与实际行数 3 不符'
+printf '{"id":"cloudv:x","kind":"cloud-policy-version","layout":"{}"}\n{"_count" : 1}\n' >"$TMP/bad-layout-row.jsonl"
+run_layout_check 3 --sources "$TMP/bad-layout-row.jsonl"; expect_err '字段不合要求'
+printf '{"id":"api:x","kind":"cloud-policy-version-layout","layout":"{}"}\n{"_count" : 1}\n' >"$TMP/bad-layout-row.jsonl"
+run_layout_check 3 --sources "$TMP/bad-layout-row.jsonl"; expect_err '字段不合要求'
+printf '{"id":"cloudv:x","kind":"cloud-policy-version-layout","layout":null}\n{"_count" : 1}\n' >"$TMP/bad-layout-row.jsonl"
+run_layout_check 3 --sources "$TMP/bad-layout-row.jsonl"; expect_err '字段不合要求'
 default_exports
 
 # ---------- 常规 diff 扫描的源计数与 --allow-empty-api-db ----------
