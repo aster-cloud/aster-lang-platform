@@ -378,7 +378,7 @@ ADR 0058 §7.2）；aster-api 不落库，排版随导出请求 `PackageExportRe
 | 字段 | 来源 |
 | --- | --- |
 | `id` / `kind` | `cloudv:<"PolicyVersion".id>` / `cloud-policy-version-layout`（只含有排版的版本，`"PolicyVersionLayout"` 每行一条） |
-| `lexicon` / `lexiconFrom` | 与 `export-vocab.sql` 同法反推：重算 `sourceEnvelopeSha256`（`envelope`），否则取引用快照唯一的 locale（`snapshot`），否则为空 |
+| `lexicon` | 与 `export-vocab.sql` 同法反推：重算 `sourceEnvelopeSha256`，否则取引用快照唯一的 locale，否则为空（打印为 `?`） |
 | `layout` | `"PolicyVersionLayout".layout` 原文（`serializeLayout` 的逐字节输出 `{"v":1,"spans":[{"text"} \| {"canonical","display"}]}`） |
 
 display 文本与 canonical 文本都不另外存列：它们是各 span 的 display / canonical 侧依次拼接（ts `./layout` 的 `toDisplay` / `toCanonical`），

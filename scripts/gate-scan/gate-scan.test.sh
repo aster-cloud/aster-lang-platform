@@ -627,8 +627,7 @@ const [out] = process.argv.slice(2);
 const T = text => ({ text });
 const S = (canonical, display) => ({ canonical, display });
 const lay = (...spans) => JSON.stringify({ v: 1, spans });
-const row = (id, lexicon, layout, o = {}) => ({ id, kind: 'cloud-policy-version-layout', lexicon,
-  lexiconFrom: lexicon ? 'envelope' : null, layout, ...o });
+const row = (id, lexicon, layout) => ({ id, kind: 'cloud-policy-version-layout', lexicon, layout });
 const rows = [
   // G5a：结构 span 的 canonical 含反引号——恰为 L10 三元组形状、与空格合并（E11）、JSON 里写成 ` 转义
   row('cloudv:g5a_triple', 'zh-CN', lay(T('SECRET_TEXT_床前'), S('`', ''), T('当'), S('`', ''), T('明月光'))),
@@ -744,9 +743,10 @@ SQL_LAYOUTS_FILE="$HERE/export-layouts.sql"
 grep -q 'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;' "$SQL_LAYOUTS_FILE" || fail "排版导出必须在 READ ONLY 事务里"
 grep -q "json_build_object('_count', count(\*))" "$SQL_LAYOUTS_FILE" || fail "排版导出必须带 _count 完成标记"
 grep -q 'RAISE EXCEPTION' "$SQL_LAYOUTS_FILE" || fail "不带 -v cloud=1 时排版导出必须报错"
-# 输出键只能是 id / kind / lexicon / lexiconFrom / layout（content 只出现在 envelope 重算里，形如 ->>'content'）
+# 输出键只能是 id / kind / lexicon / layout（content 只出现在 envelope 重算里，形如 ->>'content'）
 ! grep -q -E "(^|[[:space:](,])'(content|source)'[[:space:]]*," "$SQL_LAYOUTS_FILE" || fail "排版导出不得输出源码列"
-grep -q "'layout', ver.layout" "$SQL_LAYOUTS_FILE" || fail "排版导出应输出 layout 原文"
+[ "$(grep -o -E "^ +'[a-zA-Z]+', " "$SQL_LAYOUTS_FILE" | tr -d " ,'" | tr '\n' ' ')" = "id kind lexicon layout " ] \
+  || fail "排版导出的键应恰为 id kind lexicon layout"
 
 CASE="layout-check 规则命中与对照"
 run_layout_check 1 --sources "$CLOUD_LAYOUT"

@@ -8,12 +8,12 @@
 --   layout 列是 serializeLayout 的逐字节输出 {"v":1,"spans":[{"text"}|{"canonical","display"}]}。display 文本与 canonical
 --   文本都不另外存列：二者是各 span 的 display / canonical 侧依次拼接（ts ./layout 的 toDisplay / toCanonical），由
 --   layout-check.mjs 从 layout 推出，所以只导出 layout 原文。
--- 不导出源码（"PolicyVersion".content）：每行 {id, kind, lexicon, lexiconFrom, layout}——
+-- 不导出源码（"PolicyVersion".content）：每行只有 {id, kind, lexicon, layout}——
 --   id        cloudv:<PolicyVersion.id>（与 export-vocab.sql / export-policy-sources.sql 的版本 id 同形）
 --   kind      cloud-policy-version-layout
 --   lexicon   编译语言，与 export-vocab.sql 同法反推（cloud 版本没有 locale 列）：
---             1. envelope：对候选 locale 重算 sourceEnvelopeSha256（lexiconFrom = "envelope"）；
---             2. 冻结快照引用的 locale 唯一时取之（lexiconFrom = "snapshot"）；
+--             1. envelope：对候选 locale 重算 sourceEnvelopeSha256；
+--             2. 否则取冻结快照引用的唯一 locale；
 --             3. 否则为 NULL（layout-check.mjs 打印为 ?）。
 --   layout    "PolicyVersionLayout".layout 原文（文本，解析交给 layout-check.mjs）
 -- 较新迁移才有的 "PolicyVersion" 列（sourceScopesJson 等）经 to_jsonb(行) 读取，未迁移时读到 NULL。
@@ -68,7 +68,6 @@ src AS (
            'id', 'cloudv:' || ver.id,
            'kind', 'cloud-policy-version-layout',
            'lexicon', coalesce(env.lexicon, snap.locale),
-           'lexiconFrom', CASE WHEN env.lexicon IS NOT NULL THEN 'envelope' WHEN snap.locale IS NOT NULL THEN 'snapshot' END,
            'layout', ver.layout
          )::text AS line
     FROM ver
