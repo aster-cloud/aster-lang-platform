@@ -364,7 +364,20 @@ group = "cloud.aster-lang"
 //   公开 exports 不变）；test:npm 2.7.0 → 2.8.0（minor：语料只增，另有两份 zh 样本改用汉字标识符）。runtime /
 //   validation / locales / hi 源码无变更，lockstep 重新打 tag；ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，本次不发布。
 //
-version = "1.0.55"
+// 1.0.56：Wave D——名字转义 `x`（ADR 0064）、显示排版 L10、D6 解析对齐、性能修复。core：关键词当名字两引擎同码同判
+//   （#316，ADR 0056 修订 A6 K1–K3：E901 / W802）；名字转义 `x` 与别名 / 词汇不得含反引号（#317，ADR 0064 E1、ADR 0060
+//   修订 2 E2；新码 E902；纯新增，全角反引号不再折叠）；显示排版隐藏名字转义的反引号 L10（#318，ADR 0059 修订 5 E4）；
+//   parse_diagnostics_parity 加 ts#389 的 4 行（#319，只改测试）；名称解析的局部名与声明查找改为索引、随规模线性
+//   （#320，#312）；转义整段判定改二分查端点（#321）。truffle：显示排版的 L10 编排与 show 的隐藏转义说明（#205）。
+//   locales / hi：E901 / W802 与 E902 译文（locales #157 #158，hi #118 #119；只改 Maven overlay、test-support 码表
+//   与 syntax-diagnostics，ui-messages 的包输入 src/main/resources/ui-messages 无变更）。test：关键词当名字、名字转义、
+//   D6 的 tier1 样本与必拒样本（#256 #257 #259）、L10 向量与包一致性夹具（#258）、调用深度边界夹具（#260；不进 npm 包）。
+//   ts npm 3.7.0 → 3.8.0（minor：新语法 `x`、新码 E902 / E901 / W802、./layout 新增 L10 导出与 validatePolicyLayout
+//   的可选参数；D6 放宽 if 作名字与大写开头的 Let 名）；test:npm 2.8.0 → 2.9.0（minor：语料只增，manifest 追加条目，
+//   packages/js/src 无改动）。platform：gate-scan export --with-layouts 与 layout-check（#146）。runtime / validation
+//   源码无变更，lockstep 重新打 tag；ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，本次不发布。
+//
+version = "1.0.56"
 
 catalog {
     versionCatalog {
@@ -380,7 +393,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.55")
+        version("asterLang", "1.0.56")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
