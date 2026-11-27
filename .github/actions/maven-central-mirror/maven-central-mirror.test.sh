@@ -5,6 +5,7 @@
 #   1. 仓库顺序：镜像紧插在第一个 Central / Plugin Portal 之前，mavenLocal / GitHub Packages 等前置仓库顺序不变；
 #      覆盖 settings 的 pluginManagement（隐式缺省与显式声明）、dependencyResolutionManagement、项目 buildscript /
 #      repositories，以及 includeBuild 的构建；没声明 Central 的容器不被插入；ASTER_MAVEN_CENTRAL_MIRROR 可覆盖地址。
+#      settings 的 plugins {} 在隐式 Portal 下也先问镜像；
 #      带内容过滤（content {} / exclusiveContent {}）的容器在使用前撤掉镜像；Kotlin DSL、FAIL_ON_PROJECT_REPOS、
 #      settings buildscript 下插入不出错。
 #   2. install.sh：写入 init.d 与重试参数，重复执行幂等，不覆盖调用方已有的同名键。
@@ -215,5 +216,20 @@ ASTER_MAVEN_CENTRAL_MIRROR="http://127.0.0.1:$(cat "$TMP/port")/maven2/" gradle 
 grep -q 'Received status code 429' "$TMP/out" || fail "应报 429"
 n="$(grep -c 'org/example/missing/1.0/missing-1.0.pom' "$TMP/requests" || true)"
 [ "$n" = 6 ] || fail "镜像应被请求 6 次（max.tentatives=6），实际 $n 次"
+
+# settings 的 plugins {}（pluginManagement 未声明仓库、走隐式 Portal）在 settings 评估期间解析，也应先问镜像。
+# 假仓库回 429，构建在镜像处失败，不会访问真正的 Plugin Portal。
+CASE=settings-plugin
+SP="$TMP/sp"
+mkdir -p "$SP"
+cat >"$SP/settings.gradle" <<'EOF'
+plugins { id 'org.example.fake' version '1.0' }
+rootProject.name = 'sp'
+EOF
+: >"$TMP/requests"
+ASTER_MAVEN_CENTRAL_MIRROR="http://127.0.0.1:$(cat "$TMP/port")/maven2/" gradle "$SP" help
+[ "$rc" != 0 ] || fail "镜像持续 429 时构建应失败"
+grep -q '/maven2/org/example/fake/org.example.fake.gradle.plugin/1.0/org.example.fake.gradle.plugin-1.0.pom' "$TMP/requests" \
+  || fail "settings 插件应先向镜像请求 marker，实际请求：$(cat "$TMP/requests")"
 
 echo "maven-central-mirror: all cases passed"

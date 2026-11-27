@@ -16,8 +16,9 @@
 //   - 容器里若有带内容过滤（`content {}` / `exclusiveContent {}`）的上游仓库，插入不带过滤的镜像可能把本该由后面仓库
 //     提供的模块改从镜像取。这种容器在使用前（settings 评估完、各配置解析前）撤掉镜像，恢复原样。生态各仓目前都没有这种写法。
 //   - 动态版本（`1.+`、范围）由 Gradle 在全部仓库里取最高版本（DynamicVersionResolver），镜像元数据滞后不会让版本变旧。
-//   - pluginManagement 没声明仓库时 Gradle 隐式用 Plugin Portal；这里显式补上 gradlePluginPortal()（与隐式行为等价），
-//     让镜像能插在它前面——jmh 插件的 jmh-core 就是经 Plugin Portal 重定向到 Central 才 429 的。
+//   - pluginManagement 没声明仓库时 Gradle 隐式用 Plugin Portal；这里在 settings 脚本执行前显式放一个 Portal 替身
+//     （与隐式行为等价，settings 自己声明仓库时撤掉），让镜像能插在它前面，settings 的 plugins {} 也能用上——
+//     jmh 插件的 jmh-core 就是经 Plugin Portal 重定向到 Central 才 429 的。
 //
 // 本地开发不受影响：只有 CI 的 action 会安装本脚本。
 
@@ -93,17 +94,30 @@ def mirrorBeforeUpstream = { RepositoryHandler repos ->
     }
 }
 
+// pluginManagement 没声明仓库时 Gradle 隐式用 Plugin Portal。settings 脚本执行前先显式放一个 Portal（等价于隐式缺省），
+// 镜像就能在 settings 的 plugins {} 解析之前插到它前面；settings 脚本一旦自己声明仓库，就撤掉这个替身（连同镜像），
+// 按它声明的顺序重新插入——与「声明了仓库就不再有隐式 Portal」的原语义一致。
+def standInImplicitPortal = { RepositoryHandler repos ->
+    def standIn = repos.gradlePluginPortal()
+    repos.whenObjectAdded { ArtifactRepository repo ->
+        if (standIn == null || repo.is(standIn) || repo.name == mirrorName) return
+        repos.remove(standIn)
+        def mirror = repos.findByName(mirrorName)
+        if (mirror != null) repos.remove(mirror)
+        standIn = null
+    }
+}
+
 beforeSettings { settings ->
     mirrorBeforeUpstream(settings.buildscript.repositories)
     dropMirrorBeforeResolve(settings.buildscript.configurations, settings.buildscript.repositories)
+    // 先挂替身的撤除钩子，再挂插入钩子：settings 声明第一个上游仓库时，先撤旧镜像，再把镜像插到它前面。
+    if (settings.pluginManagement.repositories.isEmpty()) standInImplicitPortal(settings.pluginManagement.repositories)
     mirrorBeforeUpstream(settings.pluginManagement.repositories)
     mirrorBeforeUpstream(settings.dependencyResolutionManagement.repositories)
 }
 
 settingsEvaluated { settings ->
-    if (settings.pluginManagement.repositories.isEmpty()) {
-        settings.pluginManagement.repositories.gradlePluginPortal()
-    }
     dropMirrorIfFiltered(settings.pluginManagement.repositories)
     dropMirrorIfFiltered(settings.dependencyResolutionManagement.repositories)
 }
