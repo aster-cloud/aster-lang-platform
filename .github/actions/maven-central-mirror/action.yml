@@ -1,0 +1,28 @@
+name: Maven Central mirror for Gradle
+description: >
+  让本 job 里此后的全部 Gradle 构建优先从 Maven Central 的 Google Cloud Storage 镜像下载依赖，缺货再回落原仓库，
+  并调高 Gradle 依赖解析对 429 等瞬时错误的重试次数与退避。
+
+  为什么：GitHub 托管 runner 共用出口 IP，repo.maven.apache.org 按 IP 限流（HTTP 429）。生态 CI 在每次 run 里构建多个兄弟仓，
+  缓存挡不住依赖升级后的差量下载，退避重试也扛不住持续数分钟的限流（2026-11-27 truffle native / platform api-parity /
+  ts parity / aster-api verify）。
+
+  用法：在第一次运行 Gradle 之前加一步。各仓 CI 已把 platform 检出到 ./aster-lang-platform（checkout-sibling 按同名分支匹配），
+  用本地路径引用，跨仓改动在合并前即可验证：
+
+    - uses: ./aster-lang-platform/.github/actions/maven-central-mirror
+
+  setup-gradle-cached 已内置本步骤，用了它的 job 不必再加。
+
+  行为与安全性：
+    - 镜像只插在第一个 Central / Plugin Portal 仓库之前；mavenLocal、GitHub Packages 等排在前面的仓库顺序不变，
+      CI 先 publishToMavenLocal 的兄弟仓制品照旧优先。
+    - 镜像是 Central 的逐字节副本，校验和不变；不改写、不删除原仓库，镜像 404（同步滞后、Portal 独有插件）时按原顺序回落。
+    - 只改 Gradle 用户目录（init.d 与 gradle.properties），不动 ~/.gradle/caches，与 setup-java / setup-gradle 的缓存互不干扰。
+
+runs:
+  using: composite
+  steps:
+    - name: Install Maven Central mirror init script
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/install.sh"

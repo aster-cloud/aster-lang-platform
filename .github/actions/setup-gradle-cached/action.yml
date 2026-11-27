@@ -1,7 +1,7 @@
 name: Setup JDK + Gradle dependency cache
 description: >
-  装 JDK，按构建文件恢复 Gradle 依赖缓存（先恢复、再让 Gradle 解析），并把 gradle-retry.sh / gradle-version.sh
-  加进 PATH（aster-lang-platform#138）。供各引擎仓 release workflow 的 create-tag / publish 使用。
+  装 JDK，按构建文件恢复 Gradle 依赖缓存（先恢复、再让 Gradle 解析），启用 Maven Central 镜像（../maven-central-mirror），
+  并把 gradle-retry.sh / gradle-version.sh 加进 PATH（aster-lang-platform#138）。供各引擎仓 release workflow 的 create-tag / publish 使用。
 
   为什么需要：create-tag 原来只装 JDK、不带任何 Gradle 缓存，每次在冷 runner 上从 Maven Central 解析 platform 与本仓的
   构建插件依赖（例如 core 的 jmh 插件拉 jmh-core）。列车同一层的各仓 release 并行启动，请求叠加，eco-1.0.52 的 core
@@ -136,6 +136,12 @@ runs:
       with:
         path: ~/.gradle/wrapper
         key: gradle-wrapper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/gradle-wrapper.properties') }}
+
+    # Maven Central 镜像 + Gradle 依赖解析重试（见 ../maven-central-mirror）。任何 cache 方式都装：
+    # 限流打的是缓存缺失的差量下载，与缓存怎么存无关。
+    - name: Install Maven Central mirror init script
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../maven-central-mirror/install.sh"
 
     - name: Put gradle-retry.sh / gradle-version.sh on PATH
       shell: bash
