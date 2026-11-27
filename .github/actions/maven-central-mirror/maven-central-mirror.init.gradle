@@ -1,0 +1,65 @@
+// Maven Central 镜像（CI 专用 Gradle init 脚本，由 .github/actions/maven-central-mirror 装进 Gradle 用户目录的 init.d）。
+//
+// 为什么：GitHub 托管 runner 共用出口 IP，repo.maven.apache.org 按 IP 限流，生态各 workflow 又按 includeBuild /
+// publishToMavenLocal 在每次 run 里解析多个兄弟仓的完整依赖图，于是频繁 HTTP 429（2026-11-27：truffle native、
+// platform release-train api-parity、ts parity、aster-api verify）。缓存只能挡住已缓存的模块——依赖一升级，差量照样打
+// Central，限流持续数分钟，退避重试也挡不住（api-parity 用 gradle-retry.sh 重试 3 次仍 429）。
+//
+// 做法：在构建声明的每个「Maven Central / Gradle Plugin Portal」仓库**紧前面**插入同一个 Maven Central 镜像
+// （缺省 Google Cloud Storage 镜像，可用环境变量 ASTER_MAVEN_CENTRAL_MIRROR 覆盖）。
+//   - 不改写、不删除原仓库：镜像缺货（同步滞后、Plugin Portal 独有的插件）时 Gradle 照常回落到原仓库，结果不变。
+//   - 只插在第一个 Central / Portal 之前：在它前面的仓库（mavenLocal、GitHub Packages）顺序不变，
+//     所以 CI 先 publishToMavenLocal 的兄弟仓 cloud.aster-lang 制品仍优先于任何远端，不会换成旧的已发布版本。
+//   - 镜像是 Central 的逐字节副本：同一坐标的文件与 Central 完全相同，校验和 / 依赖校验（verification-metadata）不受影响。
+//   - 覆盖 settings（pluginManagement、dependencyResolutionManagement、settings buildscript）、每个项目的 buildscript
+//     与 repositories；init 脚本对构建树里的每个 build（含 includeBuild、buildSrc）都会执行。
+//   - pluginManagement 没声明仓库时 Gradle 隐式用 Plugin Portal；这里显式补上 gradlePluginPortal()（与隐式行为等价），
+//     让镜像能插在它前面——jmh 插件的 jmh-core 就是经 Plugin Portal 重定向到 Central 才 429 的。
+//
+// 本地开发不受影响：只有 CI 的 action 会安装本脚本。
+
+def mirrorUrl = (System.getenv('ASTER_MAVEN_CENTRAL_MIRROR') ?: 'https://maven-central.storage-download.googleapis.com/maven2/').trim()
+def mirrorName = 'MavenCentralMirror'
+// Central 的两个官方主机名，以及会把非插件制品重定向到 Central 的 Plugin Portal。
+def upstreamHosts = ['repo.maven.apache.org', 'repo1.maven.org', 'plugins.gradle.org'] as Set
+
+def isUpstream = { repo ->
+    repo instanceof MavenArtifactRepository && repo.name != mirrorName && upstreamHosts.contains(repo.url?.host)
+}
+
+// 每个仓库容器只插一次：插在第一个上游仓库之前，镜像就已排在全部上游仓库前面。
+def insertMirror = { RepositoryHandler repos, ArtifactRepository upstream ->
+    if (repos.findByName(mirrorName) != null) return
+    def mirror = repos.maven { MavenArtifactRepository m ->
+        m.name = mirrorName
+        m.url = mirrorUrl
+    }
+    repos.remove(mirror)
+    repos.add(repos.indexOf(upstream), mirror)
+}
+
+def mirrorBeforeUpstream = { RepositoryHandler repos ->
+    // 已声明的仓库（本脚本挂钩之前加入的）与之后加入的都要处理。
+    def existing = repos.find { isUpstream(it) }
+    if (existing != null) insertMirror(repos, existing)
+    repos.whenObjectAdded { ArtifactRepository repo ->
+        if (isUpstream(repo)) insertMirror(repos, repo)
+    }
+}
+
+beforeSettings { settings ->
+    mirrorBeforeUpstream(settings.buildscript.repositories)
+    mirrorBeforeUpstream(settings.pluginManagement.repositories)
+    mirrorBeforeUpstream(settings.dependencyResolutionManagement.repositories)
+}
+
+settingsEvaluated { settings ->
+    if (settings.pluginManagement.repositories.isEmpty()) {
+        settings.pluginManagement.repositories.gradlePluginPortal()
+    }
+}
+
+allprojects { project ->
+    mirrorBeforeUpstream(project.buildscript.repositories)
+    mirrorBeforeUpstream(project.repositories)
+}

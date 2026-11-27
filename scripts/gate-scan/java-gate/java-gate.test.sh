@@ -33,8 +33,10 @@ JK="${JAVA_GATE_JACKSON_DIR:-$TMP/jackson}"
 mkdir -p "$JK"
 while read -r group artifact sha; do
   jar="$JK/$artifact-$JACKSON_VERSION.jar"
-  [ -f "$jar" ] || curl -fsSL -o "$jar" \
-    "https://repo1.maven.org/maven2/com/fasterxml/jackson/$group/$artifact/$JACKSON_VERSION/$artifact-$JACKSON_VERSION.jar"
+  # 先走 Maven Central 的 GCS 镜像，失败再回落 Central（托管 runner 上 Central 常 429）；下面按 SHA-256 校验，来源不影响结果。
+  path="com/fasterxml/jackson/$group/$artifact/$JACKSON_VERSION/$artifact-$JACKSON_VERSION.jar"
+  [ -f "$jar" ] || curl -fsSL -o "$jar" "https://maven-central.storage-download.googleapis.com/maven2/$path" \
+    || curl -fsSL -o "$jar" "https://repo1.maven.org/maven2/$path"
   got="$(shasum -a 256 "$jar" 2>/dev/null || sha256sum "$jar")"
   [ "${got%% *}" = "$sha" ] || { echo "Jackson 校验失败：$jar"; exit 1; }
 done <<'EOF'

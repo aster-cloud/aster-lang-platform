@@ -118,8 +118,18 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
+      # Maven Central 限流（429）防护：此后的 Gradle 构建优先走 Central 镜像，缺货回落原仓库。
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        uses: ./.github/actions/maven-central-mirror
+
+      # 共享 maven-central-mirror（镜像 init 脚本 + Gradle 依赖解析重试参数）的回归测试：用本仓 Gradle Wrapper 跑临时夹具，
+      # 用临时 Gradle 用户目录，不受上一步安装的影响。
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        name: maven-central-mirror regression test
+        run: bash .github/actions/maven-central-mirror/maven-central-mirror.test.sh
+
       # 门禁扫描 Java 侧（scripts/gate-scan/java-gate）：桩引擎覆盖各分组、缺语言包 / classpath 条目 / 截断导出 / 与 ts
-      # 对账失败的退出码 3，以及 regex-scan / corpus-to-jsonl。Jackson 按固定版本与 SHA-256 从 Maven Central 下载。
+      # 对账失败的退出码 3，以及 regex-scan / corpus-to-jsonl。Jackson 按固定版本与 SHA-256 从 Maven Central（先走镜像）下载。
       - if: ${{ needs.changes.outputs.docs-only != 'true' }}
         name: java-gate regression test
         run: bash scripts/gate-scan/java-gate/java-gate.test.sh

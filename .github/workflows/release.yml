@@ -103,6 +103,9 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
+      # Maven Central 限流（429）防护：此后的 Gradle 构建优先走 Central 镜像，缺货回落原仓库（制品逐字节相同）。
+      - uses: ./.github/actions/maven-central-mirror
+
       # Tag↔version guard (audit #32): the v* tag must match the platform's own
       # version literal in build.gradle.kts. Without this, a manually pushed
       # v1.0.14 on a 1.0.13 commit would publish/no-op under the wrong tag with no
