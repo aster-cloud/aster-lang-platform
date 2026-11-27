@@ -1,4 +1,5 @@
-// Maven Central 镜像（CI 专用 Gradle init 脚本，由 .github/actions/maven-central-mirror 装进 Gradle 用户目录的 init.d）。
+// Maven Central 镜像（CI 专用 Gradle init 脚本，由 .github/actions/maven-central-mirror/install.sh 以
+// aster-maven-central-mirror.init.gradle 装进 Gradle 用户目录的 init.d；源文件扩展名故意不是 .gradle，见 install.sh）。
 //
 // 为什么：GitHub 托管 runner 共用出口 IP，repo.maven.apache.org 按 IP 限流，生态各 workflow 又按 includeBuild /
 // publishToMavenLocal 在每次 run 里解析多个兄弟仓的完整依赖图，于是频繁 HTTP 429（2026-11-27：truffle native、

@@ -4,7 +4,7 @@
 # 用法：bash install.sh            （由 action.yml 与 setup-gradle-cached 调用）
 #
 # 装两样东西，之后本 job 里的每次 Gradle 调用（含兄弟仓的 publishToMavenLocal、includeBuild）都生效：
-#   1. init.d/aster-maven-central-mirror.init.gradle —— 在每个 Maven Central / Plugin Portal 仓库紧前面插入镜像，
+#   1. init.d/aster-maven-central-mirror.init.gradle（源文件 maven-central-mirror.init.groovy）—— 在每个 Maven Central / Plugin Portal 仓库紧前面插入镜像，
 #      语义见该脚本文件头；
 #   2. gradle.properties 里的依赖解析重试参数（Gradle 内部属性，9.6.1 的 ErrorHandlingModuleComponentRepository 读取）：
 #        org.gradle.internal.repository.max.tentatives  缺省 3 → 6
@@ -17,11 +17,13 @@
 #   ASTER_MAVEN_CENTRAL_MIRROR  构建时读取（不是安装时）：覆盖镜像地址，缺省 Google Cloud Storage 的 Maven Central 镜像
 set -euo pipefail
 
+# 源文件不用 .gradle 扩展名：各仓缓存键 hashFiles('**/*.gradle*') 会把检出的 platform 一并算进去，
+# 叫 *.gradle 的话每改一次本脚本，所有消费方的 Gradle 缓存都会整条失效。
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 guh="${GRADLE_USER_HOME:-$HOME/.gradle}"
 
 mkdir -p "$guh/init.d"
-cp "$HERE/maven-central-mirror.init.gradle" "$guh/init.d/aster-maven-central-mirror.init.gradle"
+cp "$HERE/maven-central-mirror.init.groovy" "$guh/init.d/aster-maven-central-mirror.init.gradle"
 
 props="$guh/gradle.properties"
 touch "$props"

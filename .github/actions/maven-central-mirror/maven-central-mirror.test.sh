@@ -50,7 +50,7 @@ CASE=install
 printf 'org.gradle.jvmargs=-Xmx1g\nsystemProp.org.gradle.internal.repository.initial.backoff=10' >"$GUH/gradle.properties"   # 末尾无换行
 GRADLE_USER_HOME="$GUH" bash "$HERE/install.sh" >/dev/null
 GRADLE_USER_HOME="$GUH" bash "$HERE/install.sh" >/dev/null
-cmp -s "$HERE/maven-central-mirror.init.gradle" "$GUH/init.d/aster-maven-central-mirror.init.gradle" || fail "init 脚本未装入 init.d"
+cmp -s "$HERE/maven-central-mirror.init.groovy" "$GUH/init.d/aster-maven-central-mirror.init.gradle" || fail "init 脚本未装入 init.d"
 [ "$(grep -c '^systemProp.org.gradle.internal.repository.max.tentatives=6$' "$GUH/gradle.properties")" = 1 ] \
   || fail "max.tentatives 应恰好写入一次：$(cat "$GUH/gradle.properties")"
 [ "$(grep -c '^systemProp.org.gradle.internal.repository.initial.backoff=' "$GUH/gradle.properties")" = 1 ] \
