@@ -5,6 +5,8 @@
 #   1. 仓库顺序：镜像紧插在第一个 Central / Plugin Portal 之前，mavenLocal / GitHub Packages 等前置仓库顺序不变；
 #      覆盖 settings 的 pluginManagement（隐式缺省与显式声明）、dependencyResolutionManagement、项目 buildscript /
 #      repositories，以及 includeBuild 的构建；没声明 Central 的容器不被插入；ASTER_MAVEN_CENTRAL_MIRROR 可覆盖地址。
+#      带内容过滤（content {} / exclusiveContent {}）的容器在使用前撤掉镜像；Kotlin DSL、FAIL_ON_PROJECT_REPOS、
+#      settings buildscript 下插入不出错。
 #   2. install.sh：写入 init.d 与重试参数，重复执行幂等，不覆盖调用方已有的同名键。
 #   3. 重试参数真的被这版 Gradle 读取：本地假仓库对每个请求回 429，镜像应恰好被请求 max.tentatives 次
 #      （Gradle 升级后内部属性改名时这里会失败）。
@@ -106,6 +108,79 @@ CASE=default-url
 gradle "$FX" help
 [ "$rc" = 0 ] || fail "夹具构建失败 rc=$rc"
 expect_line "fx.mirrorUrl=https://maven-central.storage-download.googleapis.com/maven2/"
+
+# 带内容过滤的上游仓库（content {} / exclusiveContent {}）：插入不带过滤的镜像会改变解析来源，容器使用前应撤掉镜像；
+# 不带过滤的容器保持镜像。项目容器在解析时（beforeResolve）才检查，所以在解析一个空配置之后打印。
+CASE=filtered
+FF="$TMP/ff"
+mkdir -p "$FF/p1" "$FF/p2" "$FF/p3"
+cat >"$FF/settings.gradle" <<'EOF'
+rootProject.name = 'ff'
+include('p1', 'p2', 'p3')
+dependencyResolutionManagement {
+  repositories {
+    exclusiveContent { forRepository { mavenCentral() }; filter { includeGroup 'org.yaml' } }
+    maven { name = 'GitHubPackages'; url = 'https://maven.pkg.github.com/aster-cloud/x' }
+  }
+}
+gradle.settingsEvaluated { s -> println "ff.drm=" + s.dependencyResolutionManagement.repositories*.name }
+EOF
+cat >"$FF/p1/build.gradle" <<'EOF'
+repositories { mavenCentral { content { includeGroup 'org.yaml' } }; mavenLocal() }
+configurations { probe }
+println "p1.before=" + repositories*.name
+configurations.probe.resolve()
+println "p1.after=" + repositories*.name
+EOF
+cat >"$FF/p2/build.gradle" <<'EOF'
+repositories {
+  exclusiveContent { forRepository { mavenCentral() }; filter { includeGroup 'org.yaml' } }
+  maven { name = 'GitHubPackages'; url = 'https://maven.pkg.github.com/aster-cloud/x' }
+}
+configurations { probe }
+configurations.probe.resolve()
+println "p2.after=" + repositories*.name
+EOF
+cat >"$FF/p3/build.gradle" <<'EOF'
+repositories { mavenCentral() }
+configurations { probe }
+configurations.probe.resolve()
+println "p3.after=" + repositories*.name
+EOF
+gradle "$FF" help
+[ "$rc" = 0 ] || fail "夹具构建失败 rc=$rc"
+expect_line "ff.drm=[MavenRepo, GitHubPackages]"
+expect_line "p1.before=[MavenCentralMirror, MavenRepo, MavenLocal]"
+expect_line "p1.after=[MavenRepo, MavenLocal]"
+expect_line "p2.after=[MavenRepo, GitHubPackages]"
+expect_line "p3.after=[MavenCentralMirror, MavenRepo]"
+
+# Kotlin DSL + RepositoriesMode.FAIL_ON_PROJECT_REPOS + settings buildscript：插入不应触发「项目声明了仓库」的失败。
+CASE=kotlin
+FK="$TMP/fk"
+mkdir -p "$FK"
+cat >"$FK/settings.gradle.kts" <<'EOF'
+buildscript { repositories { mavenCentral() } }
+rootProject.name = "fk"
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { mavenLocal(); mavenCentral() }
+}
+gradle.settingsEvaluated {
+    println("fk.settingsBuildscript=" + buildscript.repositories.map { it.name })
+    println("fk.drm=" + dependencyResolutionManagement.repositories.map { it.name })
+}
+EOF
+cat >"$FK/build.gradle.kts" <<'EOF'
+val probe by configurations.creating
+println("fk.project=" + repositories.map { it.name })
+probe.resolve()
+EOF
+gradle "$FK" help
+[ "$rc" = 0 ] || fail "Kotlin DSL 夹具构建失败 rc=$rc"
+expect_line "fk.settingsBuildscript=[MavenCentralMirror, MavenRepo]"
+expect_line "fk.drm=[MavenLocal, MavenCentralMirror, MavenRepo]"
+expect_line "fk.project=[]"
 
 # ---------- 3. 重试参数生效 ----------
 CASE=retry
