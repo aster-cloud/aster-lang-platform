@@ -377,7 +377,22 @@ group = "cloud.aster-lang"
 //   packages/js/src 无改动）。platform：gate-scan export --with-layouts 与 layout-check（#146）。runtime / validation
 //   源码无变更，lockstep 重新打 tag；ui-messages 1.0.31、ui-messages-hi 1.0.24 无变更，本次不发布。
 //
-version = "1.0.56"
+// 1.0.57：关键词不区分大小写（aster-lang-ts#338 第 1 部分 K）、别名接收者、构建修复。core：声明与句首关键词（#325，K-a）、
+//   语句 / 表达式 / 类型关键词（#326，K-b）、运算符与字面量关键词（#327，K-c）、workflow 与约束关键词（#330，K-d）不区分
+//   大小写（放宽：此前报错的大小写拼写现在可编译）；R2 把类型别名展开为目标类型、去掉别名接收者的 W801 回退（#324，#313；
+//   编译结果会变：别名目标没有的字段报 E801，枚举别名的 Match 裸名变为成员）；parse_diagnostics_parity 加 ts#396 的 7 行
+//   `Map of …`（#323，只改测试）。runtime：quarkus-bom 不再随发布元数据泄漏给消费方（#93）、直接依赖写明版本以修复
+//   includeBuild 消费方解析失败（#94）。truffle：自行声明 quarkus-bom（非 enforced）并删除 GraalVM SDK 规避规则（#209）、
+//   AsyncTaskRegistry 超时测试改为确定性并修复补偿排空竞态（#208）。test：K-a..K-d 的 tier1 样本与 4 个 D2 必拒样本
+//   （#267 #268 #269 #270）、别名接收者样本 vocab-en/alias-receiver（#266）、package-v1 跨 CLI 一致性门加原生侧（#264，不进
+//   npm 包）。ts npm 3.8.2 → 3.9.0（minor：D4 小写关键词不能作名字，and / or / not / as / with / to / set / use / on / plus /
+//   minus / times / modulo / async / has / produce 的小写拼写作名字由接受变 E055，ADR 0046 §11.7 先例；`Map of …` 与 core 同码
+//   E061 / E062（#396）；别名接收者按目标类型解析（#313）；K-a..K-d 为 parity 夹具；`exports` 不变，`.d.ts` 逐文件对比只增
+//   不删）；test:npm 2.9.0 → 2.10.0（minor：语料只增，manifest 追加条目，packages/js/src 无改动）。validation / locales / hi
+//   源码无变更，lockstep 重新打 tag；ui-messages 1.0.32（#148 已独立发布）、ui-messages-hi 1.0.24 自上次发布无输入变更，
+//   本次不发布。
+//
+version = "1.0.57"
 
 catalog {
     versionCatalog {
@@ -393,7 +408,7 @@ catalog {
         // 机制：catalog 对所有一方 JVM 模块使用**同一个**版本号，故每次发版
         // 全部模块 lockstep 重新打 tag —— 即便某些模块（runtime/truffle/
         // validation/locales）本次无代码变更，也会重新发布以保持生态一致。
-        version("asterLang", "1.0.56")
+        version("asterLang", "1.0.57")
 
         // ===== third-party ecosystem versions =====
         // These were previously hardcoded across consumer repos and had begun to
